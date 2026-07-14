@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+.ruff_cache/
+.venv/
+dist/
+~$*.xls*
+*.tmp.xls*
+*.repcheck.xls*
+PM_Workbook-*.xlsm
+pkcs11.txt

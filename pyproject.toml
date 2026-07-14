@@ -1,0 +1,137 @@
+[project]
+name = "excel-pm-workbook"
+version = "1.0.0"
+description = "Deterministic Excel 365 project-management workbook builder"
+requires-python = ">=3.12"
+dependencies = [
+  "defusedxml==0.7.1",
+  "olefile==0.47",
+  "oletools==0.60.2",
+  "openpyxl==3.1.5",
+  "pyopenvba==3.0.1",
+  "xlsxwriter==3.2.9",
+]
+
+[dependency-groups]
+dev = [
+  "ruff==0.15.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["dist"]
+preview = true
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "ANN",
+  "ARG",
+  "ASYNC",
+  "B",
+  "BLE",
+  "C4",
+  "C90",
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D106",
+  "D107",
+  "D200",
+  "D201",
+  "D202",
+  "D204",
+  "D205",
+  "D207",
+  "D208",
+  "D209",
+  "D210",
+  "D211",
+  "D212",
+  "D214",
+  "D215",
+  "D301",
+  "D400",
+  "D401",
+  "D402",
+  "D403",
+  "D404",
+  "D405",
+  "D406",
+  "D407",
+  "D408",
+  "D409",
+  "D410",
+  "D411",
+  "D412",
+  "D413",
+  "D414",
+  "D415",
+  "D416",
+  "D417",
+  "D418",
+  "D419",
+  "D420",
+  "DTZ",
+  "DOC102",
+  "DOC201",
+  "DOC202",
+  "DOC402",
+  "DOC403",
+  "DOC501",
+  "DOC502",
+  "E4",
+  "E501",
+  "E7",
+  "E9",
+  "EM",
+  "ERA",
+  "EXE",
+  "F",
+  "FA",
+  "FBT",
+  "FIX",
+  "FLY",
+  "FURB",
+  "G",
+  "I",
+  "ICN",
+  "INT",
+  "ISC003",
+  "LOG",
+  "N",
+  "PERF",
+  "PIE",
+  "PGH",
+  "PLC",
+  "PLE",
+  "PLR",
+  "PLW",
+  "PTH",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "SLOT",
+  "T10",
+  "T20",
+  "TC",
+  "TD",
+  "TRY",
+  "UP",
+  "YTT",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+line-ending = "lf"
+quote-style = "double"

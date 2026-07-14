@@ -1,0 +1,1136 @@
+Option Explicit
+
+Private Const ERROR_BASE As Long = vbObjectError + 2800
+Private Const DATA_CAPACITY As Long = 2000
+
+Private Const ITEMS_ID_COLUMN As Long = 1
+Private Const ITEMS_TITLE_COLUMN As Long = 3
+Private Const ITEMS_STATUS_COLUMN As Long = 7
+Private Const ITEMS_DELIVERY_HEALTH_COLUMN As Long = 9
+Private Const ITEMS_LATEST_STATUS_COLUMN As Long = 10
+Private Const ITEMS_CREATED_COLUMN As Long = 29
+Private Const ITEMS_UPDATED_COLUMN As Long = 30
+Private Const ITEMS_ACTIVE_SINCE_COLUMN As Long = 31
+Private Const ITEMS_DONE_DATE_COLUMN As Long = 32
+Private Const ITEMS_BLOCKED_SINCE_COLUMN As Long = 33
+Private Const ITEMS_LATEST_UPDATE_COLUMN As Long = 34
+
+Private Const RAID_ID_COLUMN As Long = 1
+Private Const RAID_TITLE_COLUMN As Long = 3
+Private Const RAID_RELATED_ID_COLUMN As Long = 5
+Private Const RAID_STATUS_COLUMN As Long = 7
+Private Const RAID_RAISED_COLUMN As Long = 15
+Private Const RAID_CLOSED_COLUMN As Long = 16
+Private Const RAID_UPDATED_COLUMN As Long = 17
+
+Private configSnapshotReady As Boolean
+Private statusSnapshot As Variant
+Private raidStatusSnapshot As Variant
+Private deliveryHealthSnapshot As Variant
+Private statusNameSnapshotColumn As Long
+Private statusActiveSnapshotColumn As Long
+Private statusDoneSnapshotColumn As Long
+Private statusCancelledSnapshotColumn As Long
+Private raidStatusNameSnapshotColumn As Long
+Private raidStatusClosedSnapshotColumn As Long
+Private deliveryHealthSnapshotColumn As Long
+
+Private Sub Workbook_Open()
+    On Error GoTo openFailure
+    Dim openStage As String
+    openStage = "disabling forced workbook calculation"
+    ThisWorkbook.ForceFullCalculation = False
+    openStage = "maximising the workbook window"
+    Application.WindowState = xlMaximized
+    openStage = "capturing configuration semantics"
+    CaptureConfigSemantics
+    Exit Sub
+
+openFailure:
+    MsgBox "The workbook could not finish opening." & vbCrLf & vbCrLf & _
+           "While " & openStage & "." & vbCrLf & _
+           "Error " & CStr(Err.Number) & " in " & Err.Source & vbCrLf & _
+           Err.description, vbExclamation, "Workbook opening"
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal sheet As Object, ByVal target As Excel.Range)
+    Dim sheetName As String
+    On Error GoTo eventFailure
+    If TypeName(sheet) <> "Worksheet" Then Exit Sub
+
+    Dim dataSheet As Excel.Worksheet
+    Set dataSheet = sheet
+    sheetName = dataSheet.Name
+    Select Case sheetName
+        Case "Items"
+            StampItems dataSheet, target
+        Case "RAID"
+            StampRaid dataSheet, target
+        Case "Config"
+            HandleConfigSemanticChange dataSheet, target
+    End Select
+    Exit Sub
+
+eventFailure:
+    Dim failureNumber As Long
+    Dim failureSource As String
+    Dim failureDescription As String
+    failureNumber = Err.Number
+    failureSource = Err.Source
+    failureDescription = Err.description
+    MsgBox "Workbook automation failed on " & sheetName & "." & _
+           vbCrLf & vbCrLf & failureDescription & vbCrLf & _
+           "Source: " & failureSource & vbCrLf & _
+           "Error: " & CStr(failureNumber), _
+           vbCritical, "Workbook automation"
+End Sub
+
+Private Sub UndoLastUserEdit()
+    Application.Undo
+End Sub
+
+Private Function TryUndoLastUserEdit(ByRef failureDescription As String) As Boolean
+    On Error GoTo undoFailure
+    UndoLastUserEdit
+    TryUndoLastUserEdit = True
+    Exit Function
+
+undoFailure:
+    failureDescription = Err.description
+End Function
+
+Private Function TryRestoreEnableEvents(ByVal previousValue As Boolean, _
+                                        ByRef failureDescription As String) As Boolean
+    On Error GoTo restoreFailure
+    Application.EnableEvents = previousValue
+    TryRestoreEnableEvents = True
+    Exit Function
+
+restoreFailure:
+    failureDescription = Err.description
+End Function
+
+Private Function ConfigTable(ByVal tableName As String) As Excel.ListObject
+    Dim table As Excel.ListObject
+    Set table = ThisWorkbook.Worksheets("Config").ListObjects(tableName)
+    If table.DataBodyRange Is Nothing Then
+        Err.Raise ERROR_BASE + 30, "ThisWorkbook.ConfigTable", _
+                  tableName & " has no configuration rows."
+    End If
+    Set ConfigTable = table
+End Function
+
+Private Sub ValidateCurrentConfigSemantics()
+    Dim table As Excel.ListObject
+    Dim rowIndex As Long
+    Dim value As Variant
+    Dim isActive As Boolean
+    Dim isDone As Boolean
+    Dim isCancelled As Boolean
+    Dim isClosed As Boolean
+
+    Set table = ConfigTable("tblStatuses")
+    For rowIndex = 1 To table.ListRows.Count
+        value = table.ListColumns("Status").DataBodyRange.Cells(rowIndex, 1).Value2
+        If Not PMTool.IsBlankValue(value) Then
+            PMTool.ItemStatusRoles value, isActive, isDone, isCancelled
+        End If
+    Next rowIndex
+
+    Set table = ConfigTable("tblRaidStatuses")
+    For rowIndex = 1 To table.ListRows.Count
+        value = table.ListColumns("RaidStatus").DataBodyRange.Cells(rowIndex, 1).Value2
+        If Not PMTool.IsBlankValue(value) Then
+            isClosed = PMTool.RaidStatusIsClosed(value)
+        End If
+    Next rowIndex
+
+    Set table = ConfigTable("tblDeliveryHealth")
+    Dim healthCount As Long
+    For rowIndex = 1 To table.ListRows.Count
+        value = table.ListColumns( _
+            "Delivery Health").DataBodyRange.Cells(rowIndex, 1).Value2
+        If Not PMTool.IsBlankValue(value) Then
+            healthCount = healthCount + 1
+            isClosed = PMTool.IsBlockedDeliveryHealth(value)
+        End If
+    Next rowIndex
+    If healthCount < 4 Then
+        Err.Raise ERROR_BASE + 31, _
+                  "ThisWorkbook.ValidateCurrentConfigSemantics", _
+                  "Config requires at least four Delivery Health values."
+    End If
+End Sub
+
+Private Sub CaptureConfigSemantics()
+    ValidateCurrentConfigSemantics
+
+    Dim statusTable As Excel.ListObject
+    Dim raidStatusTable As Excel.ListObject
+    Dim healthTable As Excel.ListObject
+    Dim currentStatuses As Variant
+    Dim currentRaidStatuses As Variant
+    Dim currentHealth As Variant
+    Set statusTable = ConfigTable("tblStatuses")
+    Set raidStatusTable = ConfigTable("tblRaidStatuses")
+    Set healthTable = ConfigTable("tblDeliveryHealth")
+    currentStatuses = statusTable.DataBodyRange.Value2
+    currentRaidStatuses = raidStatusTable.DataBodyRange.Value2
+    currentHealth = healthTable.DataBodyRange.Value2
+
+    statusSnapshot = currentStatuses
+    raidStatusSnapshot = currentRaidStatuses
+    deliveryHealthSnapshot = currentHealth
+    statusNameSnapshotColumn = statusTable.ListColumns("Status").index
+    statusActiveSnapshotColumn = statusTable.ListColumns("IsActive").index
+    statusDoneSnapshotColumn = statusTable.ListColumns("IsDone").index
+    statusCancelledSnapshotColumn = _
+        statusTable.ListColumns("IsCancelled").index
+    raidStatusNameSnapshotColumn = _
+        raidStatusTable.ListColumns("RaidStatus").index
+    raidStatusClosedSnapshotColumn = _
+        raidStatusTable.ListColumns("IsClosed").index
+    deliveryHealthSnapshotColumn = _
+        healthTable.ListColumns("Delivery Health").index
+    configSnapshotReady = True
+End Sub
+
+Private Function TryCaptureConfigSemantics( _
+        ByRef failureDescription As String) As Boolean
+    On Error GoTo captureFailure
+    CaptureConfigSemantics
+    TryCaptureConfigSemantics = True
+    Exit Function
+
+captureFailure:
+    failureDescription = Err.description
+End Function
+
+Private Function ConfigSemanticChangeAffected( _
+        ByVal target As Excel.Range) As Boolean
+    Dim table As Excel.ListObject
+    Set table = ConfigTable("tblStatuses")
+    If Not Application.Intersect(target, table.Range) Is Nothing Then
+        ConfigSemanticChangeAffected = True
+        Exit Function
+    End If
+    Set table = ConfigTable("tblRaidStatuses")
+    If Not Application.Intersect(target, table.Range) Is Nothing Then
+        ConfigSemanticChangeAffected = True
+        Exit Function
+    End If
+    Set table = ConfigTable("tblDeliveryHealth")
+    ConfigSemanticChangeAffected = _
+        Not Application.Intersect(target, table.Range) Is Nothing
+End Function
+
+Private Function SnapshotTextRow(ByRef data As Variant, _
+                                 ByVal textColumn As Long, _
+                                 ByVal requested As String, _
+                                 ByVal fieldName As String) As Long
+    If Not IsArray(data) Then
+        Err.Raise ERROR_BASE + 32, "ThisWorkbook.SnapshotTextRow", _
+                  fieldName & " configuration is unavailable."
+    End If
+    Dim rowIndex As Long
+    Dim value As Variant
+    Dim matches As Long
+    For rowIndex = LBound(data, 1) To UBound(data, 1)
+        value = data(rowIndex, textColumn)
+        If IsError(value) Then
+            Err.Raise ERROR_BASE + 33, "ThisWorkbook.SnapshotTextRow", _
+                      fieldName & " contains an Excel error."
+        End If
+        If Not PMTool.IsBlankValue(value) Then
+            If StrComp(Trim$(CStr(value)), requested, vbTextCompare) = 0 Then
+                matches = matches + 1
+                SnapshotTextRow = rowIndex
+            End If
+        End If
+    Next rowIndex
+    If matches > 1 Then
+        Err.Raise ERROR_BASE + 34, "ThisWorkbook.SnapshotTextRow", _
+                  fieldName & " '" & requested & "' is duplicated."
+    End If
+End Function
+
+Private Sub ValidateUsedItemStatusSemantics()
+    Dim itemsTable As Excel.ListObject
+    Set itemsTable = ThisWorkbook.Worksheets("Items").ListObjects("tblItems")
+    If itemsTable.DataBodyRange Is Nothing Then Exit Sub
+
+    Dim statusTable As Excel.ListObject
+    Set statusTable = ConfigTable("tblStatuses")
+    Dim currentData As Variant
+    currentData = statusTable.DataBodyRange.Value2
+    Dim currentNameColumn As Long
+    Dim currentActiveColumn As Long
+    Dim currentDoneColumn As Long
+    Dim currentCancelledColumn As Long
+    currentNameColumn = statusTable.ListColumns("Status").index
+    currentActiveColumn = statusTable.ListColumns("IsActive").index
+    currentDoneColumn = statusTable.ListColumns("IsDone").index
+    currentCancelledColumn = statusTable.ListColumns("IsCancelled").index
+
+    Dim usedCell As Excel.Range
+    Dim requested As String
+    Dim oldRow As Long
+    Dim currentRow As Long
+    For Each usedCell In itemsTable.ListColumns( _
+            ITEMS_STATUS_COLUMN).DataBodyRange.Cells
+        If Not PMTool.IsBlankValue(usedCell.Value2) Then
+            requested = Trim$(CStr(usedCell.Value2))
+            oldRow = SnapshotTextRow( _
+                statusSnapshot, statusNameSnapshotColumn, _
+                requested, "Items status")
+            currentRow = SnapshotTextRow( _
+                currentData, currentNameColumn, requested, "Items status")
+            If oldRow = 0 Or currentRow = 0 Then
+                Err.Raise ERROR_BASE + 35, _
+                          "ThisWorkbook.ValidateUsedItemStatusSemantics", _
+                          "Items status '" & requested & _
+                          "' cannot be renamed or removed while it is in use."
+            End If
+            If CBool(statusSnapshot( _
+                    oldRow, statusActiveSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentActiveColumn)) Or _
+               CBool(statusSnapshot( _
+                    oldRow, statusDoneSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentDoneColumn)) Or _
+               CBool(statusSnapshot( _
+                    oldRow, statusCancelledSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentCancelledColumn)) Then
+                Err.Raise ERROR_BASE + 36, _
+                          "ThisWorkbook.ValidateUsedItemStatusSemantics", _
+                          "Items status '" & requested & _
+                          "' roles cannot change while the status is in use."
+            End If
+        End If
+    Next usedCell
+End Sub
+
+Private Sub ValidateUsedRaidStatusSemantics()
+    Dim raidTable As Excel.ListObject
+    Set raidTable = ThisWorkbook.Worksheets("RAID").ListObjects("tblRAID")
+    If raidTable.DataBodyRange Is Nothing Then Exit Sub
+
+    Dim statusTable As Excel.ListObject
+    Set statusTable = ConfigTable("tblRaidStatuses")
+    Dim currentData As Variant
+    currentData = statusTable.DataBodyRange.Value2
+    Dim currentNameColumn As Long
+    Dim currentClosedColumn As Long
+    currentNameColumn = statusTable.ListColumns("RaidStatus").index
+    currentClosedColumn = statusTable.ListColumns("IsClosed").index
+
+    Dim usedCell As Excel.Range
+    Dim requested As String
+    Dim oldRow As Long
+    Dim currentRow As Long
+    For Each usedCell In raidTable.ListColumns( _
+            RAID_STATUS_COLUMN).DataBodyRange.Cells
+        If Not PMTool.IsBlankValue(usedCell.Value2) Then
+            requested = Trim$(CStr(usedCell.Value2))
+            oldRow = SnapshotTextRow( _
+                raidStatusSnapshot, raidStatusNameSnapshotColumn, _
+                requested, "RAID status")
+            currentRow = SnapshotTextRow( _
+                currentData, currentNameColumn, requested, "RAID status")
+            If oldRow = 0 Or currentRow = 0 Then
+                Err.Raise ERROR_BASE + 37, _
+                          "ThisWorkbook.ValidateUsedRaidStatusSemantics", _
+                          "RAID status '" & requested & _
+                          "' cannot be renamed or removed while it is in use."
+            End If
+            If CBool(raidStatusSnapshot( _
+                    oldRow, raidStatusClosedSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentClosedColumn)) Then
+                Err.Raise ERROR_BASE + 38, _
+                          "ThisWorkbook.ValidateUsedRaidStatusSemantics", _
+                          "RAID status '" & requested & _
+                          "' roles cannot change while the status is in use."
+            End If
+        End If
+    Next usedCell
+End Sub
+
+Private Function RangeHasEnteredValue(ByVal values As Excel.Range) As Boolean
+    Dim cell As Excel.Range
+    For Each cell In values.Cells
+        If Not PMTool.IsBlankValue(cell.Value2) Then
+            RangeHasEnteredValue = True
+            Exit Function
+        End If
+    Next cell
+End Function
+
+Private Function NextSnapshotText(ByRef data As Variant, _
+                                  ByVal textColumn As Long, _
+                                  ByRef rowCursor As Long, _
+                                  ByRef result As String) As Boolean
+    Dim value As Variant
+    Do While rowCursor <= UBound(data, 1)
+        value = data(rowCursor, textColumn)
+        rowCursor = rowCursor + 1
+        If IsError(value) Then
+            Err.Raise ERROR_BASE + 39, "ThisWorkbook.NextSnapshotText", _
+                      "Delivery Health contains an Excel error."
+        End If
+        If Not PMTool.IsBlankValue(value) Then
+            result = Trim$(CStr(value))
+            NextSnapshotText = True
+            Exit Function
+        End If
+    Loop
+End Function
+
+Private Function OrderedTextColumnsEqual( _
+        ByRef oldData As Variant, ByVal oldColumn As Long, _
+        ByRef currentData As Variant, ByVal currentColumn As Long) As Boolean
+    Dim oldCursor As Long
+    Dim currentCursor As Long
+    Dim oldText As String
+    Dim currentText As String
+    Dim hasOld As Boolean
+    Dim hasCurrent As Boolean
+    oldCursor = LBound(oldData, 1)
+    currentCursor = LBound(currentData, 1)
+    Do
+        hasOld = NextSnapshotText( _
+            oldData, oldColumn, oldCursor, oldText)
+        hasCurrent = NextSnapshotText( _
+            currentData, currentColumn, currentCursor, currentText)
+        If hasOld <> hasCurrent Then Exit Function
+        If Not hasOld Then
+            OrderedTextColumnsEqual = True
+            Exit Function
+        End If
+        If StrComp(oldText, currentText, vbTextCompare) <> 0 Then Exit Function
+    Loop
+End Function
+
+Private Sub ValidateUsedDeliveryHealthSemantics()
+    Dim itemsTable As Excel.ListObject
+    Set itemsTable = ThisWorkbook.Worksheets("Items").ListObjects("tblItems")
+    If itemsTable.DataBodyRange Is Nothing Then Exit Sub
+    If Not RangeHasEnteredValue(itemsTable.ListColumns( _
+            ITEMS_DELIVERY_HEALTH_COLUMN).DataBodyRange) Then Exit Sub
+
+    Dim healthTable As Excel.ListObject
+    Set healthTable = ConfigTable("tblDeliveryHealth")
+    Dim currentData As Variant
+    currentData = healthTable.DataBodyRange.Value2
+    Dim currentColumn As Long
+    currentColumn = healthTable.ListColumns("Delivery Health").index
+    If Not OrderedTextColumnsEqual( _
+            deliveryHealthSnapshot, deliveryHealthSnapshotColumn, _
+            currentData, currentColumn) Then
+        Err.Raise ERROR_BASE + 40, _
+                  "ThisWorkbook.ValidateUsedDeliveryHealthSemantics", _
+                  "Delivery Health values and order cannot change while " & _
+                  "Items contain Delivery Health data."
+    End If
+End Sub
+
+Private Sub HandleConfigSemanticChange( _
+        ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.Range)
+    Dim previousEvents As Boolean
+    Dim oldReady As Boolean
+    Dim oldStatuses As Variant
+    Dim oldRaidStatuses As Variant
+    Dim oldHealth As Variant
+    Dim oldStatusNameColumn As Long
+    Dim oldStatusActiveColumn As Long
+    Dim oldStatusDoneColumn As Long
+    Dim oldStatusCancelledColumn As Long
+    Dim oldRaidStatusNameColumn As Long
+    Dim oldRaidStatusClosedColumn As Long
+    Dim oldHealthColumn As Long
+    previousEvents = Application.EnableEvents
+    On Error GoTo changeFailure
+    oldReady = configSnapshotReady
+    If oldReady Then
+        oldStatuses = statusSnapshot
+        oldRaidStatuses = raidStatusSnapshot
+        oldHealth = deliveryHealthSnapshot
+        oldStatusNameColumn = statusNameSnapshotColumn
+        oldStatusActiveColumn = statusActiveSnapshotColumn
+        oldStatusDoneColumn = statusDoneSnapshotColumn
+        oldStatusCancelledColumn = statusCancelledSnapshotColumn
+        oldRaidStatusNameColumn = raidStatusNameSnapshotColumn
+        oldRaidStatusClosedColumn = raidStatusClosedSnapshotColumn
+        oldHealthColumn = deliveryHealthSnapshotColumn
+    End If
+
+    If dataSheet.Name <> "Config" Then
+        Err.Raise ERROR_BASE + 41, _
+                  "ThisWorkbook.HandleConfigSemanticChange", _
+                  "Configuration validation received the wrong worksheet."
+    End If
+    If Not ConfigSemanticChangeAffected(target) Then Exit Sub
+    Application.EnableEvents = False
+    If Not configSnapshotReady Then
+        Err.Raise ERROR_BASE + 42, _
+                  "ThisWorkbook.HandleConfigSemanticChange", _
+                  "The Config semantic baseline is unavailable. " & _
+                  "Reopen the workbook before editing role tables."
+    End If
+    ValidateCurrentConfigSemantics
+    ValidateUsedItemStatusSemantics
+    ValidateUsedRaidStatusSemantics
+    ValidateUsedDeliveryHealthSemantics
+    CaptureConfigSemantics
+
+    Dim restoreDescription As String
+    If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
+        Err.Raise ERROR_BASE + 43, _
+                  "ThisWorkbook.HandleConfigSemanticChange", _
+                  "EnableEvents restoration failed: " & restoreDescription
+    End If
+    Exit Sub
+
+changeFailure:
+    Dim failureNumber As Long
+    Dim failureSource As String
+    Dim failureDescription As String
+    Dim undoDescription As String
+    Dim recaptureDescription As String
+    Dim undoSucceeded As Boolean
+    Dim rollbackEventsDescription As String
+    Dim rollbackEventsDisabled As Boolean
+    failureNumber = Err.Number
+    failureSource = Err.Source
+    failureDescription = Err.description
+    rollbackEventsDisabled = TryRestoreEnableEvents( _
+        False, rollbackEventsDescription)
+    If rollbackEventsDisabled Then
+        undoSucceeded = TryUndoLastUserEdit(undoDescription)
+    Else
+        undoDescription = "events could not be disabled: " & _
+            rollbackEventsDescription
+    End If
+    If undoSucceeded Then
+        failureDescription = failureDescription & _
+            " The Config edit was undone."
+        If oldReady Then
+            statusSnapshot = oldStatuses
+            raidStatusSnapshot = oldRaidStatuses
+            deliveryHealthSnapshot = oldHealth
+            statusNameSnapshotColumn = oldStatusNameColumn
+            statusActiveSnapshotColumn = oldStatusActiveColumn
+            statusDoneSnapshotColumn = oldStatusDoneColumn
+            statusCancelledSnapshotColumn = oldStatusCancelledColumn
+            raidStatusNameSnapshotColumn = oldRaidStatusNameColumn
+            raidStatusClosedSnapshotColumn = oldRaidStatusClosedColumn
+            deliveryHealthSnapshotColumn = oldHealthColumn
+            configSnapshotReady = True
+        ElseIf Not TryCaptureConfigSemantics(recaptureDescription) Then
+            configSnapshotReady = False
+            failureDescription = failureDescription & _
+                " Config baseline restoration also failed: " & _
+                recaptureDescription
+        End If
+    Else
+        configSnapshotReady = False
+        failureDescription = failureDescription & _
+            " The Config edit could not be undone: " & undoDescription
+    End If
+    restoreDescription = ""
+    If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
+        failureDescription = failureDescription & _
+            " EnableEvents restoration also failed: " & restoreDescription
+    End If
+    Err.Raise failureNumber, failureSource, failureDescription
+End Sub
+
+Private Function TableChangeRange(ByVal table As Excel.ListObject, _
+                                  ByVal target As Excel.Range, _
+                                  ByVal sourceName As String) As Excel.Range
+    If table Is Nothing Then
+        Err.Raise ERROR_BASE + 18, sourceName, _
+                  "The required data table is unavailable."
+    End If
+    If table.ListRows.Count > DATA_CAPACITY Then
+        Err.Raise ERROR_BASE + 19, sourceName, _
+                  table.Name & " contains " & table.ListRows.Count & _
+                  " rows; the supported capacity is " & DATA_CAPACITY & "."
+    End If
+    If table.DataBodyRange Is Nothing Then Exit Function
+    Set TableChangeRange = Application.Intersect(target, table.DataBodyRange)
+End Function
+
+Private Function TableIdRange(ByVal table As Excel.ListObject, _
+                              ByVal header As String, _
+                              ByVal sourceName As String) As Excel.Range
+    If table Is Nothing Then
+        Err.Raise ERROR_BASE + 20, sourceName, _
+                  "The required data table is unavailable."
+    End If
+    Dim idRange As Excel.Range
+    Set idRange = table.ListColumns(header).DataBodyRange
+    If idRange Is Nothing Then
+        Err.Raise ERROR_BASE + 21, sourceName, _
+                  table.Name & " has no data rows."
+    End If
+    Set TableIdRange = idRange
+End Function
+
+Private Function RowCoreHasEnteredData(ByVal dataSheet As Excel.Worksheet, _
+                                       ByVal rowNumber As Long, _
+                                       ByVal lastCoreColumn As Long) As Boolean
+    Dim values As Variant
+    values = dataSheet.Range( _
+        dataSheet.Cells(rowNumber, 1), _
+        dataSheet.Cells(rowNumber, lastCoreColumn)).Value2
+    Dim columnIndex As Long
+    For columnIndex = 1 To lastCoreColumn
+        If Not PMTool.IsBlankValue(values(1, columnIndex)) Then
+            RowCoreHasEnteredData = True
+            Exit Function
+        End If
+    Next columnIndex
+End Function
+
+Private Sub StampItems(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.Range)
+    Dim previousEvents As Boolean
+    previousEvents = Application.EnableEvents
+    On Error GoTo stampFailure
+    Dim table As Excel.ListObject
+    Set table = dataSheet.ListObjects("tblItems")
+    Dim changed As Excel.Range
+    Set changed = TableChangeRange(table, target, "ThisWorkbook.StampItems")
+    If changed Is Nothing Then Exit Sub
+
+    Application.EnableEvents = False
+
+    Dim rowCount As Long
+    rowCount = table.ListRows.Count
+    Dim touched() As Boolean
+    Dim touchedRows() As Long
+    Dim touchedCount As Long
+    Dim activeFlags() As Boolean
+    Dim doneFlags() As Boolean
+    Dim cancelledFlags() As Boolean
+    Dim blockedFlags() As Boolean
+    Dim titleTouched() As Boolean
+    Dim statusTouched() As Boolean
+    Dim healthTouched() As Boolean
+    Dim latestStatusTouched() As Boolean
+    ReDim touched(1 To rowCount)
+    ReDim touchedRows(1 To rowCount)
+    ReDim activeFlags(1 To rowCount)
+    ReDim doneFlags(1 To rowCount)
+    ReDim cancelledFlags(1 To rowCount)
+    ReDim blockedFlags(1 To rowCount)
+    ReDim titleTouched(1 To rowCount)
+    ReDim statusTouched(1 To rowCount)
+    ReDim healthTouched(1 To rowCount)
+    ReDim latestStatusTouched(1 To rowCount)
+
+    Dim titleBody As Excel.Range
+    Dim statusBody As Excel.Range
+    Dim healthBody As Excel.Range
+    Dim latestStatusBody As Excel.Range
+    Set titleBody = table.ListColumns(ITEMS_TITLE_COLUMN).DataBodyRange
+    Set statusBody = table.ListColumns(ITEMS_STATUS_COLUMN).DataBodyRange
+    Set healthBody = table.ListColumns( _
+        ITEMS_DELIVERY_HEALTH_COLUMN).DataBodyRange
+    Set latestStatusBody = table.ListColumns( _
+        ITEMS_LATEST_STATUS_COLUMN).DataBodyRange
+
+    Dim area As Excel.Range
+    Dim changedRow As Excel.Range
+    Dim rowIndex As Long
+    For Each area In changed.Areas
+        For Each changedRow In area.Rows
+            rowIndex = changedRow.Row - table.DataBodyRange.Row + 1
+            If rowIndex < 1 Or rowIndex > rowCount Then
+                Err.Raise ERROR_BASE + 22, "ThisWorkbook.StampItems", _
+                          "A changed Items row is outside tblItems."
+            End If
+            If Not touched(rowIndex) Then
+                touched(rowIndex) = True
+                touchedCount = touchedCount + 1
+                touchedRows(touchedCount) = rowIndex
+            End If
+            If Not Application.Intersect(changedRow, titleBody) Is Nothing Then
+                titleTouched(rowIndex) = True
+            End If
+            If Not Application.Intersect(changedRow, statusBody) Is Nothing Then
+                statusTouched(rowIndex) = True
+            End If
+            If Not Application.Intersect(changedRow, healthBody) Is Nothing Then
+                healthTouched(rowIndex) = True
+            End If
+            If Not Application.Intersect( _
+                    changedRow, latestStatusBody) Is Nothing Then
+                latestStatusTouched(rowIndex) = True
+            End If
+        Next changedRow
+    Next area
+
+    Dim idRange As Excel.Range
+    Set idRange = TableIdRange( _
+        table, "ID", "ThisWorkbook.StampItems")
+    Dim rowNumber As Long
+    Dim changedIndex As Long
+    Dim applyStatus As Boolean
+    Dim applyHealth As Boolean
+    For changedIndex = 1 To touchedCount
+        rowIndex = touchedRows(changedIndex)
+        rowNumber = table.ListRows(rowIndex).Range.Row
+        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
+        applyHealth = healthTouched(rowIndex) Or titleTouched(rowIndex)
+        ValidateItemRow dataSheet, idRange, rowNumber, _
+                        applyStatus, applyHealth, _
+                        activeFlags(rowIndex), doneFlags(rowIndex), _
+                        cancelledFlags(rowIndex), blockedFlags(rowIndex)
+    Next changedIndex
+
+    Dim writesStarted As Boolean
+    writesStarted = True
+    For changedIndex = 1 To touchedCount
+        rowIndex = touchedRows(changedIndex)
+        rowNumber = table.ListRows(rowIndex).Range.Row
+        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
+        applyHealth = healthTouched(rowIndex) Or titleTouched(rowIndex)
+        StampItemRow dataSheet, idRange, rowNumber, _
+                     applyStatus, applyHealth, _
+                     latestStatusTouched(rowIndex), _
+                     activeFlags(rowIndex), doneFlags(rowIndex), _
+                     cancelledFlags(rowIndex), blockedFlags(rowIndex)
+    Next changedIndex
+
+    Application.EnableEvents = previousEvents
+    Exit Sub
+
+stampFailure:
+    Dim failureNumber As Long
+    Dim failureSource As String
+    Dim failureDescription As String
+    failureNumber = Err.Number
+    failureSource = Err.Source
+    failureDescription = Err.description
+    Dim undoDescription As String
+    Dim restoreDescription As String
+    Dim rollbackEventsDescription As String
+    Dim rollbackEventsDisabled As Boolean
+    Dim undoSucceeded As Boolean
+    If Not writesStarted Then
+        rollbackEventsDisabled = TryRestoreEnableEvents( _
+            False, rollbackEventsDescription)
+        If rollbackEventsDisabled Then
+            undoSucceeded = TryUndoLastUserEdit(undoDescription)
+        Else
+            undoDescription = "events could not be disabled: " & _
+                rollbackEventsDescription
+        End If
+        If undoSucceeded Then
+            failureDescription = failureDescription & _
+                " The invalid Items edit was undone."
+        Else
+            failureDescription = failureDescription & _
+                " The invalid Items edit could not be undone: " & _
+                undoDescription
+        End If
+    Else
+        failureDescription = failureDescription & _
+            " Automation writes had started; review the affected row."
+    End If
+    If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
+        failureDescription = failureDescription & _
+            " EnableEvents restoration also failed: " & restoreDescription
+    End If
+    Err.Raise failureNumber, failureSource, failureDescription
+End Sub
+
+Private Sub ValidateItemRow(ByVal dataSheet As Excel.Worksheet, _
+                            ByVal idRange As Excel.Range, _
+                            ByVal rowNumber As Long, _
+                            ByVal readStatusRoles As Boolean, _
+                            ByVal readBlockedRole As Boolean, _
+                            ByRef isActive As Boolean, _
+                            ByRef isDone As Boolean, _
+                            ByRef isCancelled As Boolean, _
+                            ByRef isBlocked As Boolean)
+    isActive = False
+    isDone = False
+    isCancelled = False
+    isBlocked = False
+    Dim hasTitle As Boolean
+    Dim hasId As Boolean
+    hasTitle = Not PMTool.IsBlankValue( _
+        dataSheet.Cells(rowNumber, ITEMS_TITLE_COLUMN).Value2)
+    hasId = Not PMTool.IsBlankValue( _
+        dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2)
+    If Not RowCoreHasEnteredData(dataSheet, rowNumber, 12) Then Exit Sub
+    If Not hasTitle Then
+        Err.Raise ERROR_BASE + 46, "ThisWorkbook.ValidateItemRow", _
+                  "A populated Items row requires a Title."
+    End If
+
+    If hasId Then
+        ValidateIdentifier idRange, _
+                           dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2, _
+                           "Item ID"
+    End If
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value, "Created"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_UPDATED_COLUMN).value, "Updated"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_ACTIVE_SINCE_COLUMN).value, _
+        "InProgressSince"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_DONE_DATE_COLUMN).value, "DoneDate"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_BLOCKED_SINCE_COLUMN).value, _
+        "BlockedSince"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN).value, _
+        "LatestUpdateOn"
+    If readStatusRoles Then
+        PMTool.ItemStatusRoles _
+            dataSheet.Cells(rowNumber, ITEMS_STATUS_COLUMN).Value2, _
+            isActive, isDone, isCancelled
+    End If
+    If readBlockedRole Then
+        isBlocked = PMTool.IsBlockedDeliveryHealth( _
+            dataSheet.Cells(rowNumber, ITEMS_DELIVERY_HEALTH_COLUMN).Value2)
+    End If
+End Sub
+
+Private Sub StampItemRow(ByVal dataSheet As Excel.Worksheet, _
+                         ByVal idRange As Excel.Range, _
+                         ByVal rowNumber As Long, _
+                         ByVal applyStatus As Boolean, _
+                         ByVal applyHealth As Boolean, _
+                         ByVal latestStatusTouched As Boolean, _
+                         ByVal isActive As Boolean, _
+                         ByVal isDone As Boolean, _
+                         ByVal isCancelled As Boolean, _
+                         ByVal isBlocked As Boolean)
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, ITEMS_TITLE_COLUMN).Value2) Then
+        If PMTool.IsBlankValue( _
+                dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2) Then
+            dataSheet.Range( _
+                dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN), _
+                dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN)).value = ""
+        Else
+            dataSheet.Cells(rowNumber, ITEMS_UPDATED_COLUMN).value = Date
+        End If
+        Exit Sub
+    End If
+
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2) Then
+        dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).value = _
+            PMTool.NextUniqueIdInRange( _
+                idRange, "Items[ID]", _
+                "cfgItemIDPrefix", "cfgNextItemID")
+    End If
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value) Then
+        dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value = Date
+    End If
+
+    If applyStatus Then
+        If isActive Then
+            If PMTool.IsBlankValue( _
+                    dataSheet.Cells(rowNumber, ITEMS_ACTIVE_SINCE_COLUMN).value) Then
+                dataSheet.Cells(rowNumber, ITEMS_ACTIVE_SINCE_COLUMN).value = Date
+            End If
+        End If
+
+        If isDone And Not isCancelled Then
+            If PMTool.IsBlankValue( _
+                    dataSheet.Cells(rowNumber, ITEMS_DONE_DATE_COLUMN).value) Then
+                dataSheet.Cells(rowNumber, ITEMS_DONE_DATE_COLUMN).value = Date
+            End If
+        Else
+            dataSheet.Cells(rowNumber, ITEMS_DONE_DATE_COLUMN).value = ""
+        End If
+    End If
+
+    If applyHealth Then
+        If isBlocked Then
+            If PMTool.IsBlankValue( _
+                    dataSheet.Cells(rowNumber, ITEMS_BLOCKED_SINCE_COLUMN).value) Then
+                dataSheet.Cells(rowNumber, ITEMS_BLOCKED_SINCE_COLUMN).value = Date
+            End If
+        Else
+            dataSheet.Cells(rowNumber, ITEMS_BLOCKED_SINCE_COLUMN).value = ""
+        End If
+    End If
+
+    If latestStatusTouched Then
+        If PMTool.IsBlankValue( _
+                dataSheet.Cells(rowNumber, ITEMS_LATEST_STATUS_COLUMN).Value2) Then
+            dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN).value = ""
+        Else
+            dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN).value = Date
+        End If
+    End If
+    dataSheet.Cells(rowNumber, ITEMS_UPDATED_COLUMN).value = Date
+End Sub
+
+Private Sub StampRaid(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.Range)
+    Dim previousEvents As Boolean
+    previousEvents = Application.EnableEvents
+    On Error GoTo stampFailure
+    Dim table As Excel.ListObject
+    Set table = dataSheet.ListObjects("tblRAID")
+    Dim changed As Excel.Range
+    Set changed = TableChangeRange(table, target, "ThisWorkbook.StampRaid")
+    If changed Is Nothing Then Exit Sub
+
+    Application.EnableEvents = False
+
+    Dim rowCount As Long
+    rowCount = table.ListRows.Count
+    Dim touched() As Boolean
+    Dim touchedRows() As Long
+    Dim closedFlags() As Boolean
+    Dim relatedTouched() As Boolean
+    Dim titleTouched() As Boolean
+    Dim statusTouched() As Boolean
+    Dim touchedCount As Long
+    ReDim touched(1 To rowCount)
+    ReDim touchedRows(1 To rowCount)
+    ReDim closedFlags(1 To rowCount)
+    ReDim relatedTouched(1 To rowCount)
+    ReDim titleTouched(1 To rowCount)
+    ReDim statusTouched(1 To rowCount)
+
+    Dim relatedBody As Excel.Range
+    Dim titleBody As Excel.Range
+    Dim statusBody As Excel.Range
+    Set relatedBody = table.ListColumns( _
+        RAID_RELATED_ID_COLUMN).DataBodyRange
+    Set titleBody = table.ListColumns(RAID_TITLE_COLUMN).DataBodyRange
+    Set statusBody = table.ListColumns(RAID_STATUS_COLUMN).DataBodyRange
+
+    Dim area As Excel.Range
+    Dim changedRow As Excel.Range
+    Dim rowIndex As Long
+    For Each area In changed.Areas
+        For Each changedRow In area.Rows
+            rowIndex = changedRow.Row - table.DataBodyRange.Row + 1
+            If rowIndex < 1 Or rowIndex > rowCount Then
+                Err.Raise ERROR_BASE + 23, "ThisWorkbook.StampRaid", _
+                          "A changed RAID row is outside tblRAID."
+            End If
+            If Not touched(rowIndex) Then
+                touched(rowIndex) = True
+                touchedCount = touchedCount + 1
+                touchedRows(touchedCount) = rowIndex
+            End If
+            If Not Application.Intersect(changedRow, relatedBody) Is Nothing Then
+                relatedTouched(rowIndex) = True
+            End If
+            If Not Application.Intersect(changedRow, titleBody) Is Nothing Then
+                titleTouched(rowIndex) = True
+            End If
+            If Not Application.Intersect(changedRow, statusBody) Is Nothing Then
+                statusTouched(rowIndex) = True
+            End If
+        Next changedRow
+    Next area
+
+    Dim idRange As Excel.Range
+    Set idRange = TableIdRange( _
+        table, "RaidID", "ThisWorkbook.StampRaid")
+    Dim rowNumber As Long
+    Dim changedIndex As Long
+    Dim applyStatus As Boolean
+    For changedIndex = 1 To touchedCount
+        rowIndex = touchedRows(changedIndex)
+        rowNumber = table.ListRows(rowIndex).Range.Row
+        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
+        ValidateRaidRow dataSheet, idRange, rowNumber, _
+                        applyStatus, relatedTouched(rowIndex), _
+                        closedFlags(rowIndex)
+    Next changedIndex
+
+    Dim writesStarted As Boolean
+    writesStarted = True
+    For changedIndex = 1 To touchedCount
+        rowIndex = touchedRows(changedIndex)
+        rowNumber = table.ListRows(rowIndex).Range.Row
+        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
+        StampRaidRow dataSheet, idRange, rowNumber, applyStatus, _
+                     closedFlags(rowIndex)
+    Next changedIndex
+
+    Application.EnableEvents = previousEvents
+    Exit Sub
+
+stampFailure:
+    Dim failureNumber As Long
+    Dim failureSource As String
+    Dim failureDescription As String
+    failureNumber = Err.Number
+    failureSource = Err.Source
+    failureDescription = Err.description
+    Dim undoDescription As String
+    Dim restoreDescription As String
+    Dim rollbackEventsDescription As String
+    Dim rollbackEventsDisabled As Boolean
+    Dim undoSucceeded As Boolean
+    If Not writesStarted Then
+        rollbackEventsDisabled = TryRestoreEnableEvents( _
+            False, rollbackEventsDescription)
+        If rollbackEventsDisabled Then
+            undoSucceeded = TryUndoLastUserEdit(undoDescription)
+        Else
+            undoDescription = "events could not be disabled: " & _
+                rollbackEventsDescription
+        End If
+        If undoSucceeded Then
+            failureDescription = failureDescription & _
+                " The invalid RAID edit was undone."
+        Else
+            failureDescription = failureDescription & _
+                " The invalid RAID edit could not be undone: " & _
+                undoDescription
+        End If
+    Else
+        failureDescription = failureDescription & _
+            " Automation writes had started; review the affected row."
+    End If
+    If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
+        failureDescription = failureDescription & _
+            " EnableEvents restoration also failed: " & restoreDescription
+    End If
+    Err.Raise failureNumber, failureSource, failureDescription
+End Sub
+
+Private Sub ValidateRaidRow(ByVal dataSheet As Excel.Worksheet, _
+                            ByVal idRange As Excel.Range, _
+                            ByVal rowNumber As Long, _
+                            ByVal readStatusRole As Boolean, _
+                            ByVal validateRelatedResolution As Boolean, _
+                            ByRef isClosed As Boolean)
+    isClosed = False
+    Dim hasTitle As Boolean
+    Dim hasId As Boolean
+    hasTitle = Not PMTool.IsBlankValue( _
+        dataSheet.Cells(rowNumber, RAID_TITLE_COLUMN).Value2)
+    hasId = Not PMTool.IsBlankValue( _
+        dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2)
+    If Not RowCoreHasEnteredData(dataSheet, rowNumber, 12) Then Exit Sub
+    If Not hasTitle Then
+        Err.Raise ERROR_BASE + 47, "ThisWorkbook.ValidateRaidRow", _
+                  "A populated RAID row requires a Title."
+    End If
+
+    If hasId Then
+        ValidateIdentifier idRange, _
+                           dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2, _
+                           "RAID ID"
+    End If
+    ValidateRelatedItemIdentifier _
+        dataSheet.Cells(rowNumber, RAID_RELATED_ID_COLUMN).Value2, _
+        validateRelatedResolution
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value, "Raised"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, RAID_CLOSED_COLUMN).value, "Closed"
+    ValidateDateOrBlank _
+        dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN).value, "Updated"
+    If readStatusRole Then
+        isClosed = PMTool.RaidStatusIsClosed( _
+            dataSheet.Cells(rowNumber, RAID_STATUS_COLUMN).Value2)
+    End If
+End Sub
+
+Private Sub ValidateRelatedItemIdentifier( _
+        ByVal value As Variant, ByVal validateResolution As Boolean)
+    If PMTool.IsBlankValue(value) Then Exit Sub
+    Dim identifier As String
+    identifier = PMTool.ValidatedIdentifierText( _
+        value, "RelatedID", "ThisWorkbook.ValidateRelatedItemIdentifier")
+    If Not validateResolution Then Exit Sub
+    Dim itemsTable As Excel.ListObject
+    Set itemsTable = ThisWorkbook.Worksheets("Items").ListObjects("tblItems")
+    If itemsTable.DataBodyRange Is Nothing Then
+        Err.Raise ERROR_BASE + 44, _
+                  "ThisWorkbook.ValidateRelatedItemIdentifier", _
+                  "RelatedID '" & identifier & _
+                  "' cannot resolve because Items has no data rows."
+    End If
+    Dim itemIds As Excel.Range
+    Set itemIds = TableIdRange( _
+        itemsTable, "ID", "ThisWorkbook.ValidateRelatedItemIdentifier")
+    If PMTool.ExactTextCount(itemIds, identifier, "Items[ID]") <> 1 Then
+        Err.Raise ERROR_BASE + 45, _
+                  "ThisWorkbook.ValidateRelatedItemIdentifier", _
+                  "RelatedID '" & identifier & _
+                  "' must match exactly one Items ID."
+    End If
+End Sub
+
+Private Sub ValidateIdentifier(ByVal idRange As Excel.Range, _
+                               ByVal value As Variant, _
+                               ByVal fieldName As String)
+    Dim identifier As String
+    identifier = PMTool.ValidatedIdentifierText( _
+        value, fieldName, "ThisWorkbook.ValidateIdentifier")
+    If PMTool.ExactTextCount(idRange, identifier, fieldName) <> 1 Then
+        Err.Raise ERROR_BASE + 16, "ThisWorkbook.ValidateIdentifier", _
+                  fieldName & " '" & identifier & "' is duplicated."
+    End If
+End Sub
+
+Private Sub ValidateDateOrBlank(ByVal value As Variant, _
+                                ByVal fieldName As String)
+    If PMTool.IsBlankValue(value) Then Exit Sub
+    If Not IsDate(value) Then
+        Err.Raise ERROR_BASE + 17, "ThisWorkbook.ValidateDateOrBlank", _
+                  fieldName & " must contain a valid date."
+    End If
+End Sub
+
+Private Sub StampRaidRow(ByVal dataSheet As Excel.Worksheet, _
+                         ByVal idRange As Excel.Range, _
+                         ByVal rowNumber As Long, _
+                         ByVal applyStatus As Boolean, _
+                         ByVal isClosed As Boolean)
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, RAID_TITLE_COLUMN).Value2) Then
+        If PMTool.IsBlankValue( _
+                dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2) Then
+            dataSheet.Range( _
+                dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN), _
+                dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN)).value = ""
+        Else
+            dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN).value = Date
+        End If
+        Exit Sub
+    End If
+
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2) Then
+        dataSheet.Cells(rowNumber, RAID_ID_COLUMN).value = _
+            PMTool.NextUniqueIdInRange( _
+                idRange, "RAID[RaidID]", _
+                "cfgRaidIDPrefix", "cfgNextRaidID", 3)
+    End If
+    If PMTool.IsBlankValue( _
+            dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value) Then
+        dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value = Date
+    End If
+
+    If applyStatus Then
+        If isClosed Then
+            If PMTool.IsBlankValue( _
+                    dataSheet.Cells(rowNumber, RAID_CLOSED_COLUMN).value) Then
+                dataSheet.Cells(rowNumber, RAID_CLOSED_COLUMN).value = Date
+            End If
+        Else
+            dataSheet.Cells(rowNumber, RAID_CLOSED_COLUMN).value = ""
+        End If
+    End If
+    dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN).value = Date
+End Sub
