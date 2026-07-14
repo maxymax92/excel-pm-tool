@@ -53,6 +53,8 @@ MODULES = (
             "ItemStatusRoles",
             "RaidStatusIsClosed",
             "IsBlockedDeliveryHealth",
+            "ItemTypeLevel",
+            "ApplyItemLevelPresentation",
             "NextUniqueIdInRange",
             "ExportMarkdown",
             "OrganiseItems",

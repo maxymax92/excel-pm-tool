@@ -54,8 +54,9 @@ The everyday Items surface is:
 
 `tblStatuses` carries `IsActive`, `IsDone` and `IsCancelled` flags. The labels can change while their behavior remains stable.
 
-- Entering Title on a new item assigns ID, Created and Updated.
+- Picking a Type on a new item assigns its ID; the first entry on the row stamps Created and Updated.
 - Every material edit refreshes Updated.
+- Edits are never rejected or undone; a value that Config does not define skips its role stamp and is flagged by the invalid-input formatting.
 - Entry into an active role sets InProgressSince when empty.
 - Entry into a delivered done role sets DoneDate when empty.
 - A cancelled role clears DoneDate.
@@ -69,7 +70,7 @@ Health combines configured status roles, due dates, blocked duration and update 
 - Start plus Due creates a scheduled interval.
 - Due with a blank Start creates a key date.
 - Parent intervals use the effective descendant envelope.
-- Plan filters by Level-1 Scope, visible Depth and an optional date window.
+- Plan filters by up to three Level-1 scopes, visible Depth and an optional date window.
 - The automatic window covers the displayed schedule with one week of padding.
 - The timeline is weekly and displays up to 52 columns.
 

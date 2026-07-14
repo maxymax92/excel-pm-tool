@@ -61,7 +61,8 @@ def _cf_rag_letter(ws: Worksheet, fmts: Formats, rng: str) -> None:
 
 
 # Title emphasis uses a stepped size ramp for levels 1-3 and standard body text
-# for levels 4-6. OrganiseItems reapplies the ramp after hierarchy changes.
+# for levels 4-6. The workbook VBA applies the ramp when a row's Type is set
+# and OrganiseItems reapplies it after hierarchy changes.
 LEVEL_FONTS = {level: (role["font_size"], role["bold"]) for level, role in HIERARCHY.items()}
 SETTING_BOUNDS = {
     "cfgDueSoonDays": (0, 365),

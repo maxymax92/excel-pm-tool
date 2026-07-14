@@ -138,7 +138,7 @@ E, L and P are 3-unit gutters and hold protected numeric date mirrors using the 
 ### Plan
 
 - Title and legend: row 1
-- Scope: B2
+- Scope: B2, with optional additional scopes in C2 and C3
 - Depth: B3
 - From: E2
 - To: E3
@@ -150,7 +150,7 @@ E, L and P are 3-unit gutters and hold protected numeric date mirrors using the 
 - Freeze panes: F6
 - Print area: A1:BE2005
 
-Legend states are Done, In progress, Planned, Overdue, Cancelled, Key date and Today. Schedule bars use a full-row glyph in every filled week. Month boundaries and the current week use border-only rules so bar fills remain intact.
+Legend states are Done, In progress, Planned, Overdue, Cancelled, Key date and Today. Schedule bars use a full-row glyph in every filled week, inset by white top and bottom borders so adjacent rows read as separate bars. Month boundaries and the current week use border-only rules so bar fills remain intact.
 
 ### Items
 

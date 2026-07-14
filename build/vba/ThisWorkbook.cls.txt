@@ -4,10 +4,12 @@ Private Const ERROR_BASE As Long = vbObjectError + 2800
 Private Const DATA_CAPACITY As Long = 2000
 
 Private Const ITEMS_ID_COLUMN As Long = 1
+Private Const ITEMS_TYPE_COLUMN As Long = 2
 Private Const ITEMS_TITLE_COLUMN As Long = 3
 Private Const ITEMS_STATUS_COLUMN As Long = 7
 Private Const ITEMS_DELIVERY_HEALTH_COLUMN As Long = 9
 Private Const ITEMS_LATEST_STATUS_COLUMN As Long = 10
+Private Const ITEMS_LAST_INPUT_COLUMN As Long = 12
 Private Const ITEMS_CREATED_COLUMN As Long = 29
 Private Const ITEMS_UPDATED_COLUMN As Long = 30
 Private Const ITEMS_ACTIVE_SINCE_COLUMN As Long = 31
@@ -16,9 +18,12 @@ Private Const ITEMS_BLOCKED_SINCE_COLUMN As Long = 33
 Private Const ITEMS_LATEST_UPDATE_COLUMN As Long = 34
 
 Private Const RAID_ID_COLUMN As Long = 1
+Private Const RAID_TYPE_COLUMN As Long = 2
 Private Const RAID_TITLE_COLUMN As Long = 3
-Private Const RAID_RELATED_ID_COLUMN As Long = 5
+Private Const RAID_DETAIL_COLUMN As Long = 4
 Private Const RAID_STATUS_COLUMN As Long = 7
+Private Const RAID_RESPONSE_COLUMN As Long = 11
+Private Const RAID_LAST_INPUT_COLUMN As Long = 12
 Private Const RAID_RAISED_COLUMN As Long = 15
 Private Const RAID_CLOSED_COLUMN As Long = 16
 Private Const RAID_UPDATED_COLUMN As Long = 17
@@ -612,7 +617,7 @@ Private Sub StampItems(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel
     Dim doneFlags() As Boolean
     Dim cancelledFlags() As Boolean
     Dim blockedFlags() As Boolean
-    Dim titleTouched() As Boolean
+    Dim typeTouched() As Boolean
     Dim statusTouched() As Boolean
     Dim healthTouched() As Boolean
     Dim latestStatusTouched() As Boolean
@@ -622,16 +627,16 @@ Private Sub StampItems(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel
     ReDim doneFlags(1 To rowCount)
     ReDim cancelledFlags(1 To rowCount)
     ReDim blockedFlags(1 To rowCount)
-    ReDim titleTouched(1 To rowCount)
+    ReDim typeTouched(1 To rowCount)
     ReDim statusTouched(1 To rowCount)
     ReDim healthTouched(1 To rowCount)
     ReDim latestStatusTouched(1 To rowCount)
 
-    Dim titleBody As Excel.Range
+    Dim typeBody As Excel.Range
     Dim statusBody As Excel.Range
     Dim healthBody As Excel.Range
     Dim latestStatusBody As Excel.Range
-    Set titleBody = table.ListColumns(ITEMS_TITLE_COLUMN).DataBodyRange
+    Set typeBody = table.ListColumns(ITEMS_TYPE_COLUMN).DataBodyRange
     Set statusBody = table.ListColumns(ITEMS_STATUS_COLUMN).DataBodyRange
     Set healthBody = table.ListColumns( _
         ITEMS_DELIVERY_HEALTH_COLUMN).DataBodyRange
@@ -653,8 +658,8 @@ Private Sub StampItems(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel
                 touchedCount = touchedCount + 1
                 touchedRows(touchedCount) = rowIndex
             End If
-            If Not Application.Intersect(changedRow, titleBody) Is Nothing Then
-                titleTouched(rowIndex) = True
+            If Not Application.Intersect(changedRow, typeBody) Is Nothing Then
+                typeTouched(rowIndex) = True
             End If
             If Not Application.Intersect(changedRow, statusBody) Is Nothing Then
                 statusTouched(rowIndex) = True
@@ -679,21 +684,19 @@ Private Sub StampItems(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel
     For changedIndex = 1 To touchedCount
         rowIndex = touchedRows(changedIndex)
         rowNumber = table.ListRows(rowIndex).Range.Row
-        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
-        applyHealth = healthTouched(rowIndex) Or titleTouched(rowIndex)
-        ValidateItemRow dataSheet, idRange, rowNumber, _
-                        applyStatus, applyHealth, _
-                        activeFlags(rowIndex), doneFlags(rowIndex), _
-                        cancelledFlags(rowIndex), blockedFlags(rowIndex)
+        applyStatus = statusTouched(rowIndex) Or typeTouched(rowIndex)
+        applyHealth = healthTouched(rowIndex) Or typeTouched(rowIndex)
+        ReadItemRowRoles dataSheet, rowNumber, _
+                         applyStatus, applyHealth, _
+                         activeFlags(rowIndex), doneFlags(rowIndex), _
+                         cancelledFlags(rowIndex), blockedFlags(rowIndex)
     Next changedIndex
 
-    Dim writesStarted As Boolean
-    writesStarted = True
     For changedIndex = 1 To touchedCount
         rowIndex = touchedRows(changedIndex)
         rowNumber = table.ListRows(rowIndex).Range.Row
-        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
-        applyHealth = healthTouched(rowIndex) Or titleTouched(rowIndex)
+        applyStatus = statusTouched(rowIndex) Or typeTouched(rowIndex)
+        applyHealth = healthTouched(rowIndex) Or typeTouched(rowIndex)
         StampItemRow dataSheet, idRange, rowNumber, _
                      applyStatus, applyHealth, _
                      latestStatusTouched(rowIndex), _
@@ -711,32 +714,10 @@ stampFailure:
     failureNumber = Err.Number
     failureSource = Err.Source
     failureDescription = Err.description
-    Dim undoDescription As String
     Dim restoreDescription As String
-    Dim rollbackEventsDescription As String
-    Dim rollbackEventsDisabled As Boolean
-    Dim undoSucceeded As Boolean
-    If Not writesStarted Then
-        rollbackEventsDisabled = TryRestoreEnableEvents( _
-            False, rollbackEventsDescription)
-        If rollbackEventsDisabled Then
-            undoSucceeded = TryUndoLastUserEdit(undoDescription)
-        Else
-            undoDescription = "events could not be disabled: " & _
-                rollbackEventsDescription
-        End If
-        If undoSucceeded Then
-            failureDescription = failureDescription & _
-                " The invalid Items edit was undone."
-        Else
-            failureDescription = failureDescription & _
-                " The invalid Items edit could not be undone: " & _
-                undoDescription
-        End If
-    Else
-        failureDescription = failureDescription & _
-            " Automation writes had started; review the affected row."
-    End If
+    failureDescription = failureDescription & _
+        " The Items edit was kept; automation stamps for the touched " & _
+        "rows may be incomplete."
     If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
         failureDescription = failureDescription & _
             " EnableEvents restoration also failed: " & restoreDescription
@@ -744,58 +725,90 @@ stampFailure:
     Err.Raise failureNumber, failureSource, failureDescription
 End Sub
 
-Private Sub ValidateItemRow(ByVal dataSheet As Excel.Worksheet, _
-                            ByVal idRange As Excel.Range, _
-                            ByVal rowNumber As Long, _
-                            ByVal readStatusRoles As Boolean, _
-                            ByVal readBlockedRole As Boolean, _
-                            ByRef isActive As Boolean, _
-                            ByRef isDone As Boolean, _
-                            ByRef isCancelled As Boolean, _
-                            ByRef isBlocked As Boolean)
+Private Sub TryItemStatusRoles(ByVal value As Variant, _
+                               ByRef isActive As Boolean, _
+                               ByRef isDone As Boolean, _
+                               ByRef isCancelled As Boolean)
+    On Error GoTo unreadableStatus
+    PMTool.ItemStatusRoles value, isActive, isDone, isCancelled
+    Exit Sub
+
+unreadableStatus:
+    isActive = False
+    isDone = False
+    isCancelled = False
+End Sub
+
+Private Function TryBlockedDeliveryHealth(ByVal value As Variant) As Boolean
+    On Error GoTo unreadableHealth
+    TryBlockedDeliveryHealth = PMTool.IsBlockedDeliveryHealth(value)
+    Exit Function
+
+unreadableHealth:
+    TryBlockedDeliveryHealth = False
+End Function
+
+Private Function TryRaidStatusIsClosed(ByVal value As Variant) As Boolean
+    On Error GoTo unreadableStatus
+    TryRaidStatusIsClosed = PMTool.RaidStatusIsClosed(value)
+    Exit Function
+
+unreadableStatus:
+    TryRaidStatusIsClosed = False
+End Function
+
+Private Function TryItemTypeLevel(ByVal value As Variant) As Long
+    On Error GoTo unreadableType
+    TryItemTypeLevel = PMTool.ItemTypeLevel(value)
+    Exit Function
+
+unreadableType:
+    TryItemTypeLevel = 0
+End Function
+
+Private Sub ApplyNarrativeCellFormat(ByVal dataSheet As Excel.Worksheet, _
+                                     ByVal rowNumber As Long, _
+                                     ByVal columnNumber As Long)
+    With dataSheet.Cells(rowNumber, columnNumber)
+        .WrapText = True
+        .HorizontalAlignment = xlHAlignLeft
+        .VerticalAlignment = xlVAlignTop
+    End With
+End Sub
+
+Private Sub ApplyRaidRowPresentation(ByVal dataSheet As Excel.Worksheet, _
+                                     ByVal rowNumber As Long, _
+                                     ByVal populated As Boolean)
+    ' Row heights match the data_wrapped and data_compact design tokens.
+    If populated Then
+        dataSheet.Rows(rowNumber).RowHeight = 44
+    Else
+        dataSheet.Rows(rowNumber).RowHeight = 24
+    End If
+    ApplyNarrativeCellFormat dataSheet, rowNumber, RAID_TITLE_COLUMN
+    ApplyNarrativeCellFormat dataSheet, rowNumber, RAID_DETAIL_COLUMN
+    ApplyNarrativeCellFormat dataSheet, rowNumber, RAID_RESPONSE_COLUMN
+End Sub
+
+Private Sub ReadItemRowRoles(ByVal dataSheet As Excel.Worksheet, _
+                             ByVal rowNumber As Long, _
+                             ByVal readStatusRoles As Boolean, _
+                             ByVal readBlockedRole As Boolean, _
+                             ByRef isActive As Boolean, _
+                             ByRef isDone As Boolean, _
+                             ByRef isCancelled As Boolean, _
+                             ByRef isBlocked As Boolean)
     isActive = False
     isDone = False
     isCancelled = False
     isBlocked = False
-    Dim hasTitle As Boolean
-    Dim hasId As Boolean
-    hasTitle = Not PMTool.IsBlankValue( _
-        dataSheet.Cells(rowNumber, ITEMS_TITLE_COLUMN).Value2)
-    hasId = Not PMTool.IsBlankValue( _
-        dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2)
-    If Not RowCoreHasEnteredData(dataSheet, rowNumber, 12) Then Exit Sub
-    If Not hasTitle Then
-        Err.Raise ERROR_BASE + 46, "ThisWorkbook.ValidateItemRow", _
-                  "A populated Items row requires a Title."
-    End If
-
-    If hasId Then
-        ValidateIdentifier idRange, _
-                           dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2, _
-                           "Item ID"
-    End If
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value, "Created"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_UPDATED_COLUMN).value, "Updated"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_ACTIVE_SINCE_COLUMN).value, _
-        "InProgressSince"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_DONE_DATE_COLUMN).value, "DoneDate"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_BLOCKED_SINCE_COLUMN).value, _
-        "BlockedSince"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN).value, _
-        "LatestUpdateOn"
     If readStatusRoles Then
-        PMTool.ItemStatusRoles _
+        TryItemStatusRoles _
             dataSheet.Cells(rowNumber, ITEMS_STATUS_COLUMN).Value2, _
             isActive, isDone, isCancelled
     End If
     If readBlockedRole Then
-        isBlocked = PMTool.IsBlockedDeliveryHealth( _
+        isBlocked = TryBlockedDeliveryHealth( _
             dataSheet.Cells(rowNumber, ITEMS_DELIVERY_HEALTH_COLUMN).Value2)
     End If
 End Sub
@@ -810,26 +823,33 @@ Private Sub StampItemRow(ByVal dataSheet As Excel.Worksheet, _
                          ByVal isDone As Boolean, _
                          ByVal isCancelled As Boolean, _
                          ByVal isBlocked As Boolean)
-    If PMTool.IsBlankValue( _
-            dataSheet.Cells(rowNumber, ITEMS_TITLE_COLUMN).Value2) Then
-        If PMTool.IsBlankValue( _
-                dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2) Then
-            dataSheet.Range( _
-                dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN), _
-                dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN)).value = ""
-        Else
-            dataSheet.Cells(rowNumber, ITEMS_UPDATED_COLUMN).value = Date
-        End If
+    If Not RowCoreHasEnteredData( _
+            dataSheet, rowNumber, ITEMS_LAST_INPUT_COLUMN) Then
+        dataSheet.Range( _
+            dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN), _
+            dataSheet.Cells(rowNumber, ITEMS_LATEST_UPDATE_COLUMN)).value = ""
+        PMTool.ApplyItemLevelPresentation dataSheet, rowNumber, _
+                                          ITEMS_TITLE_COLUMN, 0
+        ApplyNarrativeCellFormat dataSheet, rowNumber, _
+                                 ITEMS_LATEST_STATUS_COLUMN
         Exit Sub
     End If
 
     If PMTool.IsBlankValue( _
             dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).Value2) Then
-        dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).value = _
-            PMTool.NextUniqueIdInRange( _
-                idRange, "Items[ID]", _
-                "cfgItemIDPrefix", "cfgNextItemID")
+        If Not PMTool.IsBlankValue( _
+                dataSheet.Cells(rowNumber, ITEMS_TYPE_COLUMN).Value2) Then
+            dataSheet.Cells(rowNumber, ITEMS_ID_COLUMN).value = _
+                PMTool.NextUniqueIdInRange( _
+                    idRange, "Items[ID]", _
+                    "cfgItemIDPrefix", "cfgNextItemID")
+        End If
     End If
+    PMTool.ApplyItemLevelPresentation dataSheet, rowNumber, _
+        ITEMS_TITLE_COLUMN, TryItemTypeLevel( _
+            dataSheet.Cells(rowNumber, ITEMS_TYPE_COLUMN).Value2)
+    ApplyNarrativeCellFormat dataSheet, rowNumber, _
+                             ITEMS_LATEST_STATUS_COLUMN
     If PMTool.IsBlankValue( _
             dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value) Then
         dataSheet.Cells(rowNumber, ITEMS_CREATED_COLUMN).value = Date
@@ -892,23 +912,18 @@ Private Sub StampRaid(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.
     Dim touched() As Boolean
     Dim touchedRows() As Long
     Dim closedFlags() As Boolean
-    Dim relatedTouched() As Boolean
-    Dim titleTouched() As Boolean
+    Dim typeTouched() As Boolean
     Dim statusTouched() As Boolean
     Dim touchedCount As Long
     ReDim touched(1 To rowCount)
     ReDim touchedRows(1 To rowCount)
     ReDim closedFlags(1 To rowCount)
-    ReDim relatedTouched(1 To rowCount)
-    ReDim titleTouched(1 To rowCount)
+    ReDim typeTouched(1 To rowCount)
     ReDim statusTouched(1 To rowCount)
 
-    Dim relatedBody As Excel.Range
-    Dim titleBody As Excel.Range
+    Dim typeBody As Excel.Range
     Dim statusBody As Excel.Range
-    Set relatedBody = table.ListColumns( _
-        RAID_RELATED_ID_COLUMN).DataBodyRange
-    Set titleBody = table.ListColumns(RAID_TITLE_COLUMN).DataBodyRange
+    Set typeBody = table.ListColumns(RAID_TYPE_COLUMN).DataBodyRange
     Set statusBody = table.ListColumns(RAID_STATUS_COLUMN).DataBodyRange
 
     Dim area As Excel.Range
@@ -926,11 +941,8 @@ Private Sub StampRaid(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.
                 touchedCount = touchedCount + 1
                 touchedRows(touchedCount) = rowIndex
             End If
-            If Not Application.Intersect(changedRow, relatedBody) Is Nothing Then
-                relatedTouched(rowIndex) = True
-            End If
-            If Not Application.Intersect(changedRow, titleBody) Is Nothing Then
-                titleTouched(rowIndex) = True
+            If Not Application.Intersect(changedRow, typeBody) Is Nothing Then
+                typeTouched(rowIndex) = True
             End If
             If Not Application.Intersect(changedRow, statusBody) Is Nothing Then
                 statusTouched(rowIndex) = True
@@ -947,18 +959,15 @@ Private Sub StampRaid(ByVal dataSheet As Excel.Worksheet, ByVal target As Excel.
     For changedIndex = 1 To touchedCount
         rowIndex = touchedRows(changedIndex)
         rowNumber = table.ListRows(rowIndex).Range.Row
-        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
-        ValidateRaidRow dataSheet, idRange, rowNumber, _
-                        applyStatus, relatedTouched(rowIndex), _
-                        closedFlags(rowIndex)
+        applyStatus = statusTouched(rowIndex) Or typeTouched(rowIndex)
+        ReadRaidRowRoles dataSheet, rowNumber, _
+                         applyStatus, closedFlags(rowIndex)
     Next changedIndex
 
-    Dim writesStarted As Boolean
-    writesStarted = True
     For changedIndex = 1 To touchedCount
         rowIndex = touchedRows(changedIndex)
         rowNumber = table.ListRows(rowIndex).Range.Row
-        applyStatus = statusTouched(rowIndex) Or titleTouched(rowIndex)
+        applyStatus = statusTouched(rowIndex) Or typeTouched(rowIndex)
         StampRaidRow dataSheet, idRange, rowNumber, applyStatus, _
                      closedFlags(rowIndex)
     Next changedIndex
@@ -973,32 +982,10 @@ stampFailure:
     failureNumber = Err.Number
     failureSource = Err.Source
     failureDescription = Err.description
-    Dim undoDescription As String
     Dim restoreDescription As String
-    Dim rollbackEventsDescription As String
-    Dim rollbackEventsDisabled As Boolean
-    Dim undoSucceeded As Boolean
-    If Not writesStarted Then
-        rollbackEventsDisabled = TryRestoreEnableEvents( _
-            False, rollbackEventsDescription)
-        If rollbackEventsDisabled Then
-            undoSucceeded = TryUndoLastUserEdit(undoDescription)
-        Else
-            undoDescription = "events could not be disabled: " & _
-                rollbackEventsDescription
-        End If
-        If undoSucceeded Then
-            failureDescription = failureDescription & _
-                " The invalid RAID edit was undone."
-        Else
-            failureDescription = failureDescription & _
-                " The invalid RAID edit could not be undone: " & _
-                undoDescription
-        End If
-    Else
-        failureDescription = failureDescription & _
-            " Automation writes had started; review the affected row."
-    End If
+    failureDescription = failureDescription & _
+        " The RAID edit was kept; automation stamps for the touched " & _
+        "rows may be incomplete."
     If Not TryRestoreEnableEvents(previousEvents, restoreDescription) Then
         failureDescription = failureDescription & _
             " EnableEvents restoration also failed: " & restoreDescription
@@ -1006,89 +993,14 @@ stampFailure:
     Err.Raise failureNumber, failureSource, failureDescription
 End Sub
 
-Private Sub ValidateRaidRow(ByVal dataSheet As Excel.Worksheet, _
-                            ByVal idRange As Excel.Range, _
-                            ByVal rowNumber As Long, _
-                            ByVal readStatusRole As Boolean, _
-                            ByVal validateRelatedResolution As Boolean, _
-                            ByRef isClosed As Boolean)
+Private Sub ReadRaidRowRoles(ByVal dataSheet As Excel.Worksheet, _
+                             ByVal rowNumber As Long, _
+                             ByVal readStatusRole As Boolean, _
+                             ByRef isClosed As Boolean)
     isClosed = False
-    Dim hasTitle As Boolean
-    Dim hasId As Boolean
-    hasTitle = Not PMTool.IsBlankValue( _
-        dataSheet.Cells(rowNumber, RAID_TITLE_COLUMN).Value2)
-    hasId = Not PMTool.IsBlankValue( _
-        dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2)
-    If Not RowCoreHasEnteredData(dataSheet, rowNumber, 12) Then Exit Sub
-    If Not hasTitle Then
-        Err.Raise ERROR_BASE + 47, "ThisWorkbook.ValidateRaidRow", _
-                  "A populated RAID row requires a Title."
-    End If
-
-    If hasId Then
-        ValidateIdentifier idRange, _
-                           dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2, _
-                           "RAID ID"
-    End If
-    ValidateRelatedItemIdentifier _
-        dataSheet.Cells(rowNumber, RAID_RELATED_ID_COLUMN).Value2, _
-        validateRelatedResolution
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value, "Raised"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, RAID_CLOSED_COLUMN).value, "Closed"
-    ValidateDateOrBlank _
-        dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN).value, "Updated"
     If readStatusRole Then
-        isClosed = PMTool.RaidStatusIsClosed( _
+        isClosed = TryRaidStatusIsClosed( _
             dataSheet.Cells(rowNumber, RAID_STATUS_COLUMN).Value2)
-    End If
-End Sub
-
-Private Sub ValidateRelatedItemIdentifier( _
-        ByVal value As Variant, ByVal validateResolution As Boolean)
-    If PMTool.IsBlankValue(value) Then Exit Sub
-    Dim identifier As String
-    identifier = PMTool.ValidatedIdentifierText( _
-        value, "RelatedID", "ThisWorkbook.ValidateRelatedItemIdentifier")
-    If Not validateResolution Then Exit Sub
-    Dim itemsTable As Excel.ListObject
-    Set itemsTable = ThisWorkbook.Worksheets("Items").ListObjects("tblItems")
-    If itemsTable.DataBodyRange Is Nothing Then
-        Err.Raise ERROR_BASE + 44, _
-                  "ThisWorkbook.ValidateRelatedItemIdentifier", _
-                  "RelatedID '" & identifier & _
-                  "' cannot resolve because Items has no data rows."
-    End If
-    Dim itemIds As Excel.Range
-    Set itemIds = TableIdRange( _
-        itemsTable, "ID", "ThisWorkbook.ValidateRelatedItemIdentifier")
-    If PMTool.ExactTextCount(itemIds, identifier, "Items[ID]") <> 1 Then
-        Err.Raise ERROR_BASE + 45, _
-                  "ThisWorkbook.ValidateRelatedItemIdentifier", _
-                  "RelatedID '" & identifier & _
-                  "' must match exactly one Items ID."
-    End If
-End Sub
-
-Private Sub ValidateIdentifier(ByVal idRange As Excel.Range, _
-                               ByVal value As Variant, _
-                               ByVal fieldName As String)
-    Dim identifier As String
-    identifier = PMTool.ValidatedIdentifierText( _
-        value, fieldName, "ThisWorkbook.ValidateIdentifier")
-    If PMTool.ExactTextCount(idRange, identifier, fieldName) <> 1 Then
-        Err.Raise ERROR_BASE + 16, "ThisWorkbook.ValidateIdentifier", _
-                  fieldName & " '" & identifier & "' is duplicated."
-    End If
-End Sub
-
-Private Sub ValidateDateOrBlank(ByVal value As Variant, _
-                                ByVal fieldName As String)
-    If PMTool.IsBlankValue(value) Then Exit Sub
-    If Not IsDate(value) Then
-        Err.Raise ERROR_BASE + 17, "ThisWorkbook.ValidateDateOrBlank", _
-                  fieldName & " must contain a valid date."
     End If
 End Sub
 
@@ -1097,26 +1009,26 @@ Private Sub StampRaidRow(ByVal dataSheet As Excel.Worksheet, _
                          ByVal rowNumber As Long, _
                          ByVal applyStatus As Boolean, _
                          ByVal isClosed As Boolean)
-    If PMTool.IsBlankValue( _
-            dataSheet.Cells(rowNumber, RAID_TITLE_COLUMN).Value2) Then
-        If PMTool.IsBlankValue( _
-                dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2) Then
-            dataSheet.Range( _
-                dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN), _
-                dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN)).value = ""
-        Else
-            dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN).value = Date
-        End If
+    If Not RowCoreHasEnteredData( _
+            dataSheet, rowNumber, RAID_LAST_INPUT_COLUMN) Then
+        dataSheet.Range( _
+            dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN), _
+            dataSheet.Cells(rowNumber, RAID_UPDATED_COLUMN)).value = ""
+        ApplyRaidRowPresentation dataSheet, rowNumber, False
         Exit Sub
     End If
 
     If PMTool.IsBlankValue( _
             dataSheet.Cells(rowNumber, RAID_ID_COLUMN).Value2) Then
-        dataSheet.Cells(rowNumber, RAID_ID_COLUMN).value = _
-            PMTool.NextUniqueIdInRange( _
-                idRange, "RAID[RaidID]", _
-                "cfgRaidIDPrefix", "cfgNextRaidID", 3)
+        If Not PMTool.IsBlankValue( _
+                dataSheet.Cells(rowNumber, RAID_TYPE_COLUMN).Value2) Then
+            dataSheet.Cells(rowNumber, RAID_ID_COLUMN).value = _
+                PMTool.NextUniqueIdInRange( _
+                    idRange, "RAID[RaidID]", _
+                    "cfgRaidIDPrefix", "cfgNextRaidID", 3)
+        End If
     End If
+    ApplyRaidRowPresentation dataSheet, rowNumber, True
     If PMTool.IsBlankValue( _
             dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value) Then
         dataSheet.Cells(rowNumber, RAID_RAISED_COLUMN).value = Date

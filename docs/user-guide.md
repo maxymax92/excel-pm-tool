@@ -35,7 +35,7 @@ Keep list values unique and preserve the intended rank order. Red cells indicate
 
 ## Items
 
-Start a new row by entering Title. The workbook assigns the next ID, Created and Updated dates. Then complete Type and Status.
+Start a new row by picking a Type. The workbook assigns the next ID the moment the Type is chosen, applies that level's row height, indentation and title emphasis, and stamps Created and Updated from the first entry on the row. Add the Title, Status and the rest in any order you like.
 
 For Levels 2 through 6, choose a Parent. Set Start and Due for scheduled work. Set Due alone for a key date. Set Delivery Health on any active row, use Latest Status for the current narrative and Owner for accountability.
 
@@ -50,7 +50,7 @@ The advanced group contains derivations and event stamps. Open it to check how a
 
 ## RAID
 
-Choose a RAID Type, enter Title and Detail, link RelatedID, set Owner and Status, then complete Probability and Impact. Both cells accept whole numbers from 1 to 5 and show the scale when selected.
+Choose a RAID Type. The workbook assigns the RaidID and stamps Raised as soon as the row has data. Enter Title and Detail, link RelatedID, set Owner and Status, then complete Probability and Impact. Both rating cells accept whole numbers from 1 to 5 and show the scale when selected.
 
 Score is `Probability × Impact`, so the range is 1 to 25. Severity uses the highest Config band whose MinScore is no greater than the score. The shipped bands are Low 1-3, Medium 4-8, High 9-15 and Critical 16-25; a 5 × 5 record scores 25, so its Severity is Critical.
 
@@ -68,9 +68,9 @@ The Markdown file is a point-in-time handoff for a report or any tool that canno
 
 ## Plan
 
-Use the four controls at the top:
+Use the controls at the top:
 
-- Scope: all work or one Level-1 scope
+- Scope: all work or one Level-1 scope, plus two optional slots beside it to show up to three scopes together
 - Depth: levels 1 through 6
 - From: optional window start
 - To: optional window end
@@ -91,4 +91,4 @@ The status rail reports invalid controls, capacity limits and work lacking usabl
 
 ## Error handling
 
-Red input or Config cells indicate invalid pasted or entered data. Correct the highlighted value before relying on derived views. VBA validation errors appear as explicit messages and prevent lifecycle stamping until the value is corrected. An Excel repair report, formula error or failed macro is a release issue.
+Red input or Config cells indicate invalid pasted or entered data. Correct the highlighted value before relying on derived views. Items and RAID never reject or undo an edit: a value the workbook does not recognise simply skips its lifecycle stamp and stays highlighted until you fix it. Organise rows and the Markdown export still check the data they act on and report exactly what needs completing. An Excel repair report, formula error or failed macro is a release issue.

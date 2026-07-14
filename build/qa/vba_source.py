@@ -181,10 +181,12 @@ def _schema_constant_failures(sources: Mapping[str, str]) -> list[str]:
     event_constants = {
         "DATA_CAPACITY": DATA_ROWS,
         "ITEMS_ID_COLUMN": _column_index(ITEMS_COLUMNS, "ID"),
+        "ITEMS_TYPE_COLUMN": _column_index(ITEMS_COLUMNS, "Type"),
         "ITEMS_TITLE_COLUMN": _column_index(ITEMS_COLUMNS, "Title"),
         "ITEMS_STATUS_COLUMN": _column_index(ITEMS_COLUMNS, "Status"),
         "ITEMS_DELIVERY_HEALTH_COLUMN": _column_index(ITEMS_COLUMNS, "Delivery Health"),
         "ITEMS_LATEST_STATUS_COLUMN": _column_index(ITEMS_COLUMNS, "Latest Status"),
+        "ITEMS_LAST_INPUT_COLUMN": _column_index(ITEMS_COLUMNS, "BlockedBy"),
         "ITEMS_CREATED_COLUMN": _column_index(ITEMS_COLUMNS, "Created"),
         "ITEMS_UPDATED_COLUMN": _column_index(ITEMS_COLUMNS, "Updated"),
         "ITEMS_ACTIVE_SINCE_COLUMN": _column_index(ITEMS_COLUMNS, "InProgressSince"),
@@ -192,8 +194,11 @@ def _schema_constant_failures(sources: Mapping[str, str]) -> list[str]:
         "ITEMS_BLOCKED_SINCE_COLUMN": _column_index(ITEMS_COLUMNS, "BlockedSince"),
         "ITEMS_LATEST_UPDATE_COLUMN": _column_index(ITEMS_COLUMNS, "LatestUpdateOn"),
         "RAID_ID_COLUMN": _column_index(RAID_COLUMNS, "RaidID"),
+        "RAID_TYPE_COLUMN": _column_index(RAID_COLUMNS, "Type"),
         "RAID_TITLE_COLUMN": _column_index(RAID_COLUMNS, "Title"),
-        "RAID_RELATED_ID_COLUMN": _column_index(RAID_COLUMNS, "RelatedID"),
+        "RAID_DETAIL_COLUMN": _column_index(RAID_COLUMNS, "Detail"),
+        "RAID_RESPONSE_COLUMN": _column_index(RAID_COLUMNS, "Response"),
+        "RAID_LAST_INPUT_COLUMN": _column_index(RAID_COLUMNS, "NextReview"),
         "RAID_STATUS_COLUMN": _column_index(RAID_COLUMNS, "Status"),
         "RAID_RAISED_COLUMN": _column_index(RAID_COLUMNS, "Raised"),
         "RAID_CLOSED_COLUMN": _column_index(RAID_COLUMNS, "Closed"),
@@ -239,23 +244,44 @@ def _event_contract_failures(source: str) -> list[str]:
             "touchedRows(touchedCount) = rowIndex",
             "For changedIndex = 1 To touchedCount",
             "statusTouched(rowIndex)",
-            "titleTouched(rowIndex)",
+            "typeTouched(rowIndex)",
             "healthTouched(rowIndex)",
             "latestStatusTouched(rowIndex)",
             "ByVal readStatusRoles As Boolean",
             "ByVal readBlockedRole As Boolean",
             "ByVal readStatusRole As Boolean",
             "ByVal applyStatus As Boolean",
+            "ReadItemRowRoles",
+            "ReadRaidRowRoles",
+            "TryItemStatusRoles",
+            "TryRaidStatusIsClosed",
+            "TryBlockedDeliveryHealth",
+            "TryItemTypeLevel",
+            "PMTool.ApplyItemLevelPresentation",
+            "ApplyRaidRowPresentation",
+            "ApplyNarrativeCellFormat",
             "PMTool.ItemStatusRoles",
             "PMTool.RaidStatusIsClosed",
-            "PMTool.ExactTextCount(idRange, identifier, fieldName) <> 1",
+            "RowCoreHasEnteredData",
+            "ITEMS_TYPE_COLUMN).Value2",
+            "RAID_TYPE_COLUMN).Value2",
             "TryRestoreEnableEvents",
-            "TryUndoLastUserEdit",
         ),
     )
     failures.extend(
         f"ThisWorkbook event code scans every supported row: {token}"
         for token in ("For rowIndex = 1 To rowCount", "For rowIndex = rowCount To 1 Step -1")
+        if token in source
+    )
+    failures.extend(
+        f"ThisWorkbook event code rejects user data edits: {token}"
+        for token in (
+            "invalid Items edit",
+            "invalid RAID edit",
+            "requires a Title",
+            "ValidateItemRow",
+            "ValidateRaidRow",
+        )
         if token in source
     )
     return failures
@@ -272,6 +298,7 @@ def _config_contract_failures(source: str) -> list[str]:
             "ValidateUsedRaidStatusSemantics",
             "ValidateUsedDeliveryHealthSemantics",
             "Application.Undo",
+            "TryUndoLastUserEdit",
             "failureDescription = failureDescription & _\n"
             '            " The Config edit was undone."',
             "PMTool.ItemStatusRoles",
@@ -328,6 +355,7 @@ def _organise_contract_failures(source: str) -> list[str]:
             "ClearItemRowOutline sheet",
             ".Group",
             ".OutlineLevel <> level",
+            "ApplyItemLevelPresentation sheet",
             "ValidateItemsHierarchy",
             "ArrayRowHasEnteredData",
             "data = table.DataBodyRange.Value2",
@@ -355,6 +383,8 @@ def _core_contract_failures(source: str) -> list[str]:
             'Tbl("tblStatuses")',
             'Tbl("tblRaidStatuses")',
             'Tbl("tblDeliveryHealth")',
+            'Tbl("tblTypes")',
+            "ItemTypeLevel",
             "ConfiguredBoolean",
             "TableTextRow",
             "TextRangeStats",

@@ -79,7 +79,7 @@ PANELS = {
 }
 
 
-def _write_overview_frame(ws: Worksheet, fmts: Formats) -> Format:
+def _write_overview_frame(ws: Worksheet, fmts: Formats) -> tuple[Format, Format]:
     ws.set_tab_color(COLORS["tab_view"])
     ws.hide_gridlines(2)
     ws.set_zoom(100)
@@ -139,7 +139,7 @@ def _write_overview_frame(ws: Worksheet, fmts: Formats) -> Format:
     section_bar("risks", "Top RAID", '=IF(Calc!$AK$3>5,"Showing 5 of "&Calc!$AK$3,"")')
     section_bar("keydates", "Coming up", '=IF(Calc!$AK$4>5,"Showing 5 of "&Calc!$AK$4,"")')
     section_bar("recent", "Recent progress", '=IF(Calc!$AK$5>5,"Showing 5 of "&Calc!$AK$5,"")')
-    return body
+    return body, body_anchor
 
 
 def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> None:
@@ -147,9 +147,11 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
 
     Every value is derived from Items, RAID and Config. Counts live on Calc AK;
     every displayed date is emitted as TEXT so a column can never show ###;
-    the compact scopes panel stays frozen while scrolling right.
+    the compact scopes panel stays frozen while scrolling right. Spill anchors
+    take the bold first-column format so the first visible row matches the
+    column emphasis below it.
     """
-    body = _write_overview_frame(ws, fmts)
+    _, body_anchor = _write_overview_frame(ws, fmts)
 
     executive_status = (
         '=LET(pred,(tblItems[ID]<>"")*(tblItems[Level]>=1)*'
@@ -208,7 +210,7 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
             "empty",
             "s",
         ),
-        fmt=body,
+        fmt=body_anchor,
         label="overview-projects",
     )
 
@@ -239,7 +241,7 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
         5,
         7,
         variables=("pred", "t", "rk", "dk", "empty", "s"),
-        fmt=body,
+        fmt=body_anchor,
         label="overview-risks",
     )
 
@@ -279,7 +281,7 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
         5,
         4,
         variables=("ip", "it", "ik", "ie", "dp", "dt", "dk", "de", "t", "k", "s"),
-        fmt=body,
+        fmt=body_anchor,
         label="overview-milestones",
     )
 
@@ -306,7 +308,7 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
         5,
         5,
         variables=("pred", "t", "tk", "pk", "dk", "empty", "s"),
-        fmt=body,
+        fmt=body_anchor,
         label="overview-completed",
     )
 
@@ -532,6 +534,27 @@ def _write_plan_controls(ws: Worksheet, fmts: Formats) -> None:
     ws.set_zoom(100)
     ws.set_default_row(ROWS["data_compact"])
 
+    # Two optional scope slots extend the primary Scope filter to three
+    # concurrent Level-1 scopes. Blank slots select nothing extra.
+    for slot in ("C2", "C3"):
+        ws.write_blank(slot, None, fmts.input_cell())
+        ws.data_validation(
+            slot,
+            {
+                "validate": "list",
+                "source": "=dvScopeLabels",
+                "ignore_blank": True,
+                "show_input": True,
+                "input_title": "Additional scope",
+                "input_message": "Blank = unused; otherwise choose "
+                "another scope to show alongside.",
+                "show_error": True,
+                "error_type": "stop",
+                "error_title": "Choose a listed value",
+                "error_message": "Use the dropdown; free text is not valid.",
+            },
+        )
+
     ws.write("A3", "Depth", fmts.label())
     depth_input = fmts.get(
         "int",
@@ -539,7 +562,7 @@ def _write_plan_controls(ws: Worksheet, fmts: Formats) -> None:
         border=1,
         border_color=COLORS["border_strong"],
         locked=False,
-        **ALIGNMENT["number"],
+        **ALIGNMENT["text"],
     )
     ws.write("B3", 6, depth_input)
     ws.data_validation(
@@ -601,6 +624,8 @@ def _write_plan_controls(ws: Worksheet, fmts: Formats) -> None:
         ("E2:E3", '=AND(E2<>"",OR(NOT(ISNUMBER(E2)),E2<DATE(2020,1,1)))'),
         ("B3", '=AND($B$3<>"",OR(NOT(ISNUMBER($B$3)),$B$3<1,$B$3>6,INT($B$3)<>$B$3))'),
         ("B2", '=AND($B$2<>"",$B$2<>"All",COUNTIF(dvScopeLabels,$B$2)=0)'),
+        ("C2", '=AND($C$2<>"",$C$2<>"All",COUNTIF(dvScopeLabels,$C$2)=0)'),
+        ("C3", '=AND($C$3<>"",$C$3<>"All",COUNTIF(dvScopeLabels,$C$3)=0)'),
     ):
         ws.conditional_format(
             target,
@@ -702,6 +727,17 @@ def _write_plan_axis_frame(
         encode_formula('=IF(OR(B2="",B2="All"),"All",LEFT(B2,FIND(" · ",B2)-1))'),
         fmts.get("calc"),
     )
+    # The extra scope slots resolve to an em-dash sentinel that matches no
+    # Scope value, so blank or malformed slots never widen the view.
+    for helper, slot in (("BH2", "C2"), ("BI2", "C3")):
+        ws.write_formula(
+            helper,
+            encode_formula(
+                f'=IFERROR(IF({slot}="","(unused)",IF({slot}="All","All",'
+                f'LEFT({slot},FIND(" · ",{slot})-1))),"(unused)")'
+            ),
+            fmts.get("calc"),
+        )
     ws.set_column("BG:BI", 14, fmts.get("calc"), {"hidden": True})
     return left_text, left_date, grid_fmt, axis_month_fmt, axis_week_fmt
 
@@ -725,7 +761,9 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
     # Config levels and role flags supply the business semantics.
     pred = (
         '(tblItems[ID]<>"")*'
-        '(((selPScopeID="All")+(tblItems[Scope]=selPScopeID))>0)*'
+        '(((selPScopeID="All")+(selPScopeID2="All")+(selPScopeID3="All")+'
+        "(tblItems[Scope]=selPScopeID)+(tblItems[Scope]=selPScopeID2)+"
+        "(tblItems[Scope]=selPScopeID3))>0)*"
         "(tblItems[Level]<=dp)*"
         "(((tblItems[IsPoint]=TRUE)+"
         '((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))>0)'
@@ -895,8 +933,12 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
     # Its dynamic calculation lives in an unmerged system cell because Excel
     # requires dynamic-array formula records to remain outside merged ranges.
     status_formula = encode_formula(
-        '=LET(scopeBad,AND(selPScope<>"",selPScope<>"All",'
+        '=LET(scopeBad,OR(AND(selPScope<>"",selPScope<>"All",'
         "COUNTIF(dvScopeLabels,selPScope)=0),"
+        'AND(selPScope2<>"",selPScope2<>"All",'
+        "COUNTIF(dvScopeLabels,selPScope2)=0),"
+        'AND(selPScope3<>"",selPScope3<>"All",'
+        "COUNTIF(dvScopeLabels,selPScope3)=0)),"
         'depthBad,AND(selPDepth<>"",OR(NOT(ISNUMBER(selPDepth)),'
         "selPDepth<1,selPDepth>6,INT(selPDepth)<>selPDepth)),"
         'fromBad,AND(selPFrom<>"",OR(NOT(ISNUMBER(selPFrom)),'
@@ -907,8 +949,12 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         'dp,IF(depthBad,6,IF(selPDepth="",6,VALUE(selPDepth))),'
         'scopeID,IF(scopeBad,"All",IF(OR(selPScope="",selPScope="All"),'
         '"All",selPScopeID)),'
+        'scope2ID,IF(scopeBad,"(unused)",selPScopeID2),'
+        'scope3ID,IF(scopeBad,"(unused)",selPScopeID3),'
         'scheduled,(tblItems[ID]<>"")*'
-        '(((scopeID="All")+(tblItems[Scope]=scopeID))>0)*'
+        '(((scopeID="All")+(scope2ID="All")+(scope3ID="All")+'
+        "(tblItems[Scope]=scopeID)+(tblItems[Scope]=scope2ID)+"
+        "(tblItems[Scope]=scope3ID))>0)*"
         "(tblItems[Level]<=dp)*(((tblItems[IsPoint]=TRUE)+"
         '((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))>0),'
         "eligible,SUMPRODUCT(scheduled),"
@@ -925,7 +971,9 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         'IF(selPTo<>"",selPTo,IF(hi0=0,TODAY()+56,hi0+7))),'
         "a,lo-WEEKDAY(lo,3),span,ROUNDUP((hi-a+1)/7,0),"
         'n,SUMPRODUCT((tblItems[ID]<>"")*'
-        '(((scopeID="All")+(tblItems[Scope]=scopeID))>0)*'
+        '(((scopeID="All")+(scope2ID="All")+(scope3ID="All")+'
+        "(tblItems[Scope]=scopeID)+(tblItems[Scope]=scope2ID)+"
+        "(tblItems[Scope]=scope3ID))>0)*"
         "(tblItems[Level]<=dp)*"
         "(1-(tblItems[IsPoint]=TRUE))*"
         '(1-((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))),'
@@ -947,6 +995,8 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
             "orderBad",
             "dp",
             "scopeID",
+            "scope2ID",
+            "scope3ID",
             "scheduled",
             "eligible",
             "ids",
@@ -1015,12 +1065,22 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         ("P", COLORS["bar_plan_bg"], COLORS["bar_plan_fg"]),
         ("C", COLORS["bar_cancel_bg"], COLORS["bar_cancel_fg"]),
     ]:
+        # White top/bottom borders inset each bar within its cell so
+        # adjacent rows read as separate bars rather than one block.
         ws.conditional_format(
             grid,
             {
                 "type": "formula",
                 "criteria": f'=AND(F6<>"",F6<>"◆",$BI6="{cat}")',
-                "format": fmts.get(None, bg_color=bg, font_color=fg),
+                "format": fmts.get(
+                    None,
+                    bg_color=bg,
+                    font_color=fg,
+                    top=2,
+                    top_color=COLORS["surface"],
+                    bottom=2,
+                    bottom_color=COLORS["surface"],
+                ),
             },
         )
     # Border-only differential formats are created directly so they carry only

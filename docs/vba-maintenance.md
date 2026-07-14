@@ -58,20 +58,25 @@ Use a fresh disposable copy of the generated `PM_Workbook.xlsm`. Confirm its SHA
 
 ### Item events
 
-- A populated new row receives a well-formed unique ID, Created and Updated.
+- Picking a Type on a row without an ID assigns the next well-formed unique ID.
+- Picking a Type immediately applies its level presentation: row height, Title indent, size and weight, and top-aligned wrapped narrative cells. New rows do not inherit the presentation of the row above.
+- The first entry in any input cell stamps Created and Updated; the ID waits for Type.
 - The Config counter advances after successful assignment.
 - Active status entry stamps InProgressSince once.
 - Delivered done entry stamps DoneDate once.
 - Cancelled status clears DoneDate.
 - Selecting Blocked in Delivery Health sets BlockedSince; choosing another state clears it.
 - Latest Status edits stamp LatestUpdateOn and clearing the narrative clears the stamp.
-- Invalid IDs, duplicate IDs, invalid roles, invalid dates and malformed bulk edits are rejected before any stamps change.
+- No Items edit is rejected or undone, including bulk pastes. A pasted status or Delivery Health value that Config does not define skips its role stamps and stays flagged by the invalid-input formatting.
+- Clearing every input cell in a row clears its lifecycle stamps.
 
 ### RAID events
 
-- A populated new row receives a well-formed unique RaidID, Raised and Updated.
+- Picking a Type on a row without a RaidID assigns the next well-formed unique RaidID; the first entry stamps Raised and Updated.
+- A populated row takes the wrapped RAID row height with top-aligned Title, Detail and Response; an emptied row returns to the compact height.
 - Closing stamps Closed and reopening clears it.
-- Invalid IDs, roles and dates are rejected before any stamps change.
+- No RAID edit is rejected or undone. A status that Config does not define skips the Closed stamp and stays flagged by the invalid-input formatting.
+- Clearing every input cell in a row clears its lifecycle stamps.
 
 ### OrganiseItems
 

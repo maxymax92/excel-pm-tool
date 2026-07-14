@@ -1273,14 +1273,16 @@ def _plan_component_checks(check: SheetCheck) -> None:
         check.fails.append(f"{check.path.name}/Plan!F5: week-axis text is not white")
     expect_fill(check, "F1", COLORS["bar_done_bg"], "top-rail legend")
     expect_fill(check, "A5", COLORS["header_bg"], "view-table header")
-    for coordinate in ("B2", "E2"):
+    for coordinate in ("B2", "C2", "C3", "E2"):
         expect_fill(check, coordinate, COLORS["input_bg"], "editable filter")
-    for coordinate in ("B2", "B3", "E2", "E3"):
+    for coordinate in ("B2", "B3", "C2", "C3", "E2", "E3"):
         expect_stop_validation(check, coordinate, "Plan input")
     for coordinate, horizontal, vertical, role in (
         ("A2", "left", "center", "filter label"),
         ("B2", "left", "center", "text filter"),
-        ("B3", "right", "center", "numeric filter"),
+        ("B3", "left", "center", "numeric filter"),
+        ("C2", "left", "center", "extra scope filter"),
+        ("C3", "left", "center", "extra scope filter"),
         ("D2", "left", "center", "date filter label"),
         ("E2", "right", "center", "date filter"),
         ("F5", "center", "center", "timeline axis"),

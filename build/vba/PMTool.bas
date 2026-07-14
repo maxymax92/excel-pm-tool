@@ -471,6 +471,95 @@ Public Function IsBlockedDeliveryHealth(ByVal value As Variant) As Boolean
         (StrComp(requested, blockedValue, vbTextCompare) = 0)
 End Function
 
+Public Function ItemTypeLevel(ByVal value As Variant) As Long
+    ' Mirrors fnTypeLevel: the first configured match wins and blank,
+    ' unknown or unusable types resolve to level 0.
+    Dim requested As String
+    requested = ConfiguredText( _
+        value, "Items type", "PMTool.ItemTypeLevel")
+    If Len(requested) = 0 Then Exit Function
+
+    Dim table As Excel.ListObject
+    Set table = Tbl("tblTypes")
+    If table.DataBodyRange Is Nothing Then Exit Function
+    Dim data As Variant
+    data = table.DataBodyRange.Value2
+    Dim nameIndex As Long
+    Dim levelIndex As Long
+    nameIndex = ColOf(table, "Type")
+    levelIndex = ColOf(table, "Level")
+
+    Dim rowIndex As Long
+    Dim nameValue As Variant
+    Dim levelValue As Variant
+    For rowIndex = 1 To table.ListRows.Count
+        nameValue = data(rowIndex, nameIndex)
+        If IsError(nameValue) Then Exit Function
+        If Not IsBlankValue(nameValue) Then
+            If StrComp(Trim$(CStr(nameValue)), requested, _
+                       vbTextCompare) = 0 Then
+                levelValue = data(rowIndex, levelIndex)
+                If IsError(levelValue) Then Exit Function
+                If Not IsNumeric(levelValue) Then Exit Function
+                If CDbl(levelValue) <> Fix(CDbl(levelValue)) Then Exit Function
+                If levelValue < 1 Or levelValue > 6 Then Exit Function
+                ItemTypeLevel = CLng(levelValue)
+                Exit Function
+            End If
+        End If
+    Next rowIndex
+End Function
+
+Public Sub ApplyItemLevelPresentation(ByVal dataSheet As Excel.Worksheet, _
+                                      ByVal rowNumber As Long, _
+                                      ByVal titleColumn As Long, _
+                                      ByVal level As Long)
+    If dataSheet Is Nothing Then
+        Err.Raise ERROR_BASE + 128, "PMTool.ApplyItemLevelPresentation", _
+                  "A worksheet is required."
+    End If
+    If rowNumber < 1 Or titleColumn < 1 Then
+        Err.Raise ERROR_BASE + 129, "PMTool.ApplyItemLevelPresentation", _
+                  "The Items presentation target is invalid."
+    End If
+    If level < 0 Or level > 6 Then
+        Err.Raise ERROR_BASE + 130, "PMTool.ApplyItemLevelPresentation", _
+                  "Item levels run from 0 (unassigned) to 6."
+    End If
+
+    ' Level ramp; matches the HIERARCHY design tokens in the build.
+    Dim titleSize As Double
+    Dim levelRowHeight As Double
+    Select Case level
+        Case 1
+            titleSize = 12
+            levelRowHeight = 30
+        Case 2
+            titleSize = 11
+            levelRowHeight = 28
+        Case 3
+            titleSize = 10.5
+            levelRowHeight = 26
+        Case Else
+            titleSize = 10
+            levelRowHeight = 24
+    End Select
+
+    dataSheet.Rows(rowNumber).RowHeight = levelRowHeight
+    With dataSheet.Cells(rowNumber, titleColumn)
+        If level >= 1 Then
+            .IndentLevel = level - 1
+        Else
+            .IndentLevel = 0
+        End If
+        .Font.Bold = (level >= 1 And level <= 3)
+        .Font.Size = titleSize
+        .WrapText = True
+        .HorizontalAlignment = xlHAlignLeft
+        .VerticalAlignment = xlVAlignTop
+    End With
+End Sub
+
 Public Function NextUniqueIdInRange(ByVal idRange As Excel.Range, _
                                     ByVal fieldName As String, _
                                     ByVal prefixSetting As String, _
@@ -1985,9 +2074,9 @@ Public Sub OrganiseItems()
     Next groupLevel
 
     Dim tableRow As Excel.Range
-    Dim titleFontSize As Double
-    Dim hierarchyRowHeight As Double
+    Dim titleSheetColumn As Long
     organiseStage = "formatting the hierarchy"
+    titleSheetColumn = table.Range.Column + titleIndex - 1
     For rowIndex = 1 To table.ListRows.Count
         Set tableRow = table.DataBodyRange.Rows(rowIndex)
         idValue = data(rowIndex, idIndex)
@@ -2001,26 +2090,8 @@ Public Sub OrganiseItems()
                       CStr(tableRow.Cells(1, idIndex).value) & _
                       "' could not be verified."
         End If
-        Select Case level
-            Case 1
-                titleFontSize = 12
-                hierarchyRowHeight = 30
-            Case 2
-                titleFontSize = 11
-                hierarchyRowHeight = 28
-            Case 3
-                titleFontSize = 10.5
-                hierarchyRowHeight = 26
-            Case Else
-                titleFontSize = 10
-                hierarchyRowHeight = 24
-        End Select
-        sheet.Rows(tableRow.Row).RowHeight = hierarchyRowHeight
-        With tableRow.Cells(1, titleIndex)
-            .IndentLevel = level - 1
-            .Font.Bold = (level <= 3)
-            .Font.Size = titleFontSize
-        End With
+        ApplyItemLevelPresentation sheet, tableRow.Row, _
+                                   titleSheetColumn, level
 nextFormatRow:
     Next rowIndex
 

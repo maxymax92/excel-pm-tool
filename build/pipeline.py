@@ -201,10 +201,14 @@ def define_names(
 
     for name, reference in (
         ("selPScope", "Plan!$B$2"),
+        ("selPScope2", "Plan!$C$2"),
+        ("selPScope3", "Plan!$C$3"),
         ("selPDepth", "Plan!$B$3"),
         ("selPFrom", "Plan!$E$2"),
         ("selPTo", "Plan!$E$3"),
         ("selPScopeID", "Plan!$BG$2"),
+        ("selPScopeID2", "Plan!$BH$2"),
+        ("selPScopeID3", "Plan!$BI$2"),
     ):
         workbook.define_name(name, f"={reference}")
 
