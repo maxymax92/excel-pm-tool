@@ -4,6 +4,7 @@ import sys
 from datetime import date
 
 import openpyxl
+from openpyxl.utils.cell import range_boundaries
 
 from ..pipeline import build_one
 from ..spec import config
@@ -78,9 +79,27 @@ def main() -> None:
             try:
                 items = workbook["Items"]
                 columns = {cell.value: index + 1 for index, cell in enumerate(items[2])}
+                config_sheet = workbook["Config"]
+                health_table = config_sheet.tables["tblDeliveryHealth"]
+                health_col, health_header_row, _max_col, _max_row = range_boundaries(
+                    health_table.ref
+                )
+                health_fixture = [
+                    config_sheet.cell(row=row, column=health_col).value
+                    for row in range(
+                        health_header_row + 1,
+                        health_header_row + 1 + len(config.DELIVERY_HEALTH),
+                    )
+                ]
 
                 def value(item_index: int, column: str) -> object:
                     return items.cell(row=item_index + 2, column=columns[column]).value
+
+                blocked_overview_rows = [
+                    row
+                    for row in range(3, 8)
+                    if "I-1002" in str(workbook["Overview"].cell(row, 1).value or "")
+                ]
 
                 checks = [
                     ("I-1001 Children", value(1, "Children"), 3),
@@ -93,12 +112,30 @@ def main() -> None:
                     ("I-1002 WaitingOn", value(2, "WaitingOn"), None),
                     ("I-1004 DueIn", (value(4, "DueIn") or 0) < 0, True),
                     (
+                        "Overview resolves Blocked across Config gap",
+                        len(blocked_overview_rows),
+                        1,
+                    ),
+                    (
+                        "Overview keeps directly blocked item's health",
+                        (
+                            workbook["Overview"].cell(blocked_overview_rows[0], 2).value
+                            if blocked_overview_rows
+                            else None
+                        ),
+                        "Blocked",
+                    ),
+                    (
+                        "Calc resolves Blocked across Config gap",
+                        workbook["Calc"]["AK2"].value,
+                        1,
+                    ),
+                    (
                         "Config Delivery Health gap fixture",
-                        [workbook["Config"].cell(row, 27).value for row in range(4, 9)],
+                        health_fixture,
                         [value or None for value in config.DELIVERY_HEALTH],
                     ),
                 ]
-                len(checks)
                 for name, got, want in checks:
                     matches = (
                         abs(got - want) < FLOAT_TOLERANCE

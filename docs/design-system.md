@@ -90,7 +90,7 @@ Headers follow the alignment of their content when comparison benefits, while co
 - Row roles are 24 pt for compact data, 34 pt for table headers, 44 pt for wrapped RAID rows and 48 pt for Overview panel rows.
 - Table bodies use a bottom divider in `border`.
 - Input cells use `surface_editable` with `border_strong` where an explicit control boundary is required.
-- Calculated cells use `surface_derived` and secondary text.
+- Calculated, stamped and system-managed source-identity cells use `surface_derived` and secondary text.
 - Blank worksheet space has gridlines hidden and carries no ruled table formatting.
 - Panel and Config gutters are plain white spacing columns.
 
@@ -106,7 +106,7 @@ Table headers use `ink` fill, white 9 pt bold text and native filter controls. W
 
 ### Editable table body
 
-Editable cells use a near-white blue surface. Narrative fields wrap and align to the top. Calculated and event-stamped fields sit in one collapsed group to the right of each table’s core columns. Invalid pasted values use the danger pair and a strong border.
+Editable cells use a near-white blue surface. Narrative fields wrap and align to the top. Calculated, event-stamped and source-identity fields sit in one collapsed group to the right of each table’s core columns. Invalid pasted values use the danger pair and a strong border.
 
 ### Overview panel
 
@@ -128,7 +128,7 @@ Macro actions are flat DrawingML shapes with brand fill, white text and an acces
 
 | Panel | Columns | Headers |
 |---|---|---|
-| Executive Status Summary | A:D | Item - Top Level + Lowest Health, Delivery Health, Owner, Due |
+| Executive Status Summary | A:D | Item, Delivery Health, Owner, Due |
 | Top RAID | F:K | Type, Description, Severity, Owner, Next review, Latest Status |
 | Coming up | M:O | Milestones / Decisions / Deadlines, Date, Scope |
 | Recent progress | Q:U | Completed work, Type, Owner, Completed, Scope |
@@ -150,6 +150,8 @@ E, L and P are 3-unit gutters and hold protected numeric date mirrors using the 
 - Freeze panes: F6
 - Print area: A1:BE2005
 
+Every populated item within the selected Scope and Depth has an identity row, even when it is undated or has only Start. Start and Due cells display only that row's own values: blanks remain blank, and descendants never populate or widen an ancestor's schedule. Both direct dates render an interval bar. A direct Due with blank Start renders the existing key-date diamond. An undated or Start-only row renders no bar or key-date glyph.
+
 Legend states are Done, In progress, Planned, Overdue, Cancelled, Key date and Today. Schedule bars use a full-row glyph in every filled week, inset by white top and bottom borders so adjacent rows read as separate bars. Month boundaries and the current week use border-only rules so bar fills remain intact.
 
 ### Items
@@ -158,7 +160,8 @@ Legend states are Done, In progress, Planned, Overdue, Cancelled, Key date and T
 - Row 2: `tblItems` header
 - Rows 3 onward: table body
 - A:K core surface: ID, Type, Title, Parent, Priority, Start, Status, Due, Delivery Health, Latest Status, Owner
-- L:AL: collapsed advanced, calculated and stamped fields
+- L:AL: collapsed advanced, calculated, stamped and source-identity fields
+- AK:AL: system-managed Source and Source ID
 - Freeze panes: D3
 
 Hierarchy styling applies to ID and Title. OrganiseItems applies the full font-size, indent, row-height and outline treatment.
@@ -176,12 +179,18 @@ Conditional states on the core surface follow one contract:
 - Row 1: title rail
 - Row 2: `tblRAID` header
 - A:L core surface: RaidID, Type, Title, Detail, RelatedID, Owner, Status, Prob, Impact, Severity, Response, NextReview
-- M:Q: collapsed calculated and stamped fields
+- M:S: collapsed calculated, stamped and source-identity fields
+- R:S: system-managed Source and Source ID
 - Freeze panes: C3
 
 Wrapped records use 44 pt rows with top-aligned narrative.
 
-Probability and Impact accept whole numbers from 1 to 5. Score is `Probability × Impact`, giving a range of 1 to 25. Severity is the highest configured band whose MinScore is no greater than Score.
+RAID conditional states follow the Config role flags:
+
+- RelatedID and Owner are optional and remain neutral when blank. Invalid nonblank values remain red.
+- Probability, Impact and Severity are grey for non-alert types. Stop-style validation rejects Probability or Impact entry on those rows; pasted values are red. Alert types require the two 1-5 inputs, and all three cells are red while scoring is incomplete. The shipped alert types are Risk and Issue.
+- Score is `Probability × Impact`, giving a range of 1 to 25. Severity is the highest configured band whose MinScore is no greater than Score.
+- NextReview is amber when blank on any open RAID row and red when overdue.
 
 ### Config
 
@@ -190,18 +199,18 @@ All bands start at row 3:
 | Band | Columns |
 |---|---|
 | Settings | A:C |
-| Statuses | E:H |
-| Types | J:K |
-| Priorities | M |
-| Teams | O |
-| RAID types | Q:S |
-| RAID statuses | U:V |
-| Severity | X:Y |
-| Delivery Health | AA |
-| People | AC:AE |
-| Guidance | AG:AL |
+| Statuses | E:I |
+| Types | K:L |
+| Priorities | N |
+| Teams | P |
+| RAID types | R:T |
+| RAID statuses | V:X |
+| Severity | Z:AA |
+| Delivery Health | AC |
+| People | AE:AG |
+| Guidance | AI:AN |
 
-D, I, L, N, P, T, W, Z, AB and AF are two-unit gutters. Config list values use editable surfaces, native checkboxes for Boolean roles and red paste-safety rules for invalid values.
+D, J, M, O, Q, U, Y, AB, AD and AH are two-unit gutters. Config list values use editable surfaces, native checkboxes for Boolean roles and red paste-safety rules for invalid values. Item statuses show active, done, cancelled and deleted role flags; RAID statuses show closed and deleted role flags.
 
 ### Calc
 
@@ -218,7 +227,7 @@ Calc uses derived/system formatting, protected cells and registered bounded spil
 | Planned schedule | Slate fill | `—` in each filled week |
 | Done schedule | Teal fill | `✓` in each filled week |
 | Cancelled schedule | Subtle neutral fill | `×` in each filled week |
-| Key date | Point color | `◆` |
+| Key date | Point color | `◆` for the item's own Due when Start is blank |
 | Current week | Neutral rule | `│ Today` legend |
 
 Coming Up urgency uses four ordered ranges:

@@ -7,11 +7,12 @@
 | Python | 3.12 | Package entry points, build orchestration and QA |
 | XlsxWriter | 3.2.9 | Workbook creation, tables, formulas, validation, conditional formatting, checkboxes and VBA embedding |
 | openpyxl | 3.1.5 | Structural and presentation inspection |
+| jsonschema | 4.26.0 | Draft 2020-12 change-set validation with explicit format checks |
 | pyOpenVBA | 3.0.1 | Source-controlled VBA replacement inside a disposable Office package |
 | oletools | 0.60.2 | VBA source extraction and comparison |
 | olefile | 0.47 | OLE container inspection |
 | Ruff | 0.15.7 | Formatting and broad static-analysis gate |
-| Microsoft Excel desktop | 365 Personal for Mac 16.110, current release test | Calculation, repair detection, VBA compilation and interaction testing |
+| Microsoft Excel desktop | 365 Personal for Mac 16.111, current release test | Calculation, repair detection, VBA compilation and interaction testing |
 
 Runtime and development dependencies are pinned in `pyproject.toml` and `uv.lock` and installed with `uv sync --frozen`.
 
@@ -28,9 +29,11 @@ The workbook runtime is Microsoft Excel 365 desktop. The listed Mac version is t
 - `build.qa` verifies source hygiene, formulas, tables, names, validation, conditional formatting, package structure, VBA, calculated results and interactive latency.
 - `build.scenarios.ship_demo` produces a representative populated workbook for visual and behavioral review.
 - `python -m build.data export` and `python -m build.data migrate` capture authored rows, Config lists and settings into a bounded snapshot ring and re-render a populated workbook onto the current structure through the standard build, recalculation, semantic-preservation and rollback-capable publication path.
-- `python -m build.data monday` imports a monday.com board into the Items hierarchy over the pinned GraphQL API with cursor pagination and bounded rate-limit retries; per-board identifier maps under `dist/monday/` keep re-imports idempotent.
+- `python -m build.data describe` returns the strict provider-neutral contract, target digests, current Config choices and Item/RAID records.
+- `python -m build.data plan` parses one I-JSON change set, resolves identities and relationships, compares baseline and intended validation findings and returns exact diffs plus a time-bound token without writing the workbook.
+- `python -m build.data apply` replans the same bytes, verifies the token and workbook digest, then uses the snapshot, desktop-Excel verification and transactional publication path. A no-change apply creates no artifacts.
 - `build.automation.refresh_vba` replaces the complete source-controlled modules in a disposable workbook, proves package isolation, compiles in desktop Excel and atomically publishes the verified binary.
-- `build.automation.workspace` keeps every Excel-facing disposable copy inside Excel's private macOS Documents container, so the automated build, recalculation, repair-detection, performance and VBA-refresh paths do not request access to a new external temporary file on every run.
+- `build.automation.workspace` prefers Excel's private macOS Documents container for every Excel-facing disposable copy. If macOS denies child creation there, it reports the denial and uses one isolated mode-700 directory beneath `/private/tmp`; build, recalculation, repair-detection, performance and VBA-refresh operations share the same cleanup contract in either location.
 - `build.automation` also contains direct Excel object-model recalculation, repair-detection and performance scripts; they do not launch workbooks through Finder or scripted UI clicks.
 - `ExportMarkdown` produces one status file for senior reporting or any downstream tool when no live connection to the underlying systems is available.
 
@@ -44,7 +47,8 @@ The workbook runtime is Microsoft Excel 365 desktop. The listed Mac version is t
 6. Formula scenarios: empty, representative and adversarial workbook states.
 7. Performance testing: open, tab-switch, selection and edit latency against hard thresholds.
 8. Live interaction evidence: workbook open, identifier and lifecycle events, RAID events, hierarchy organization, buttons and Markdown export including UTF-8 content and absence of sidecars.
-9. Publication: all destinations and the root `.xlsx` cleanup commit together or roll back to their original bytes.
+9. Agent mutation safety: parser, identity, deletion, lifecycle, validation, token, literal-text and compare-and-swap contracts.
+10. Publication: all destinations, exact pre-change backups and the root `.xlsx` cleanup commit together or roll back to their original bytes.
 
 ## Primary tool references
 

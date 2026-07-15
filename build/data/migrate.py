@@ -10,7 +10,6 @@ is kept in a bounded backup ring, so no step can endanger authored data.
 from __future__ import annotations
 
 import logging
-import shutil
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -28,7 +27,7 @@ from ..pipeline import (
 from .export import export_workbook
 from .inject import injected_source, validate_snapshot
 from .schema import DATA_TABLES
-from .snapshot import prune_ring, write_snapshot
+from .snapshot import RING_LIMIT, write_snapshot
 
 if TYPE_CHECKING:
     from .export import ExportResult
@@ -69,10 +68,14 @@ def _require_workbook(workbook: Path) -> Path:
         raise MigrationError(_MigrateProblem.MISSING_WORKBOOK, source)
     if source.suffix.lower() != ".xlsm":
         raise MigrationError(_MigrateProblem.NOT_MACRO, source.name)
-    lock = source.parent / f"~${source.name}"
+    lock = _workbook_lock(source)
     if lock.exists():
         raise MigrationError(_MigrateProblem.LOCKED, source.name, lock)
     return source
+
+
+def _workbook_lock(source: Path) -> Path:
+    return source.parent / f"~${source.name}"
 
 
 def _verify_populated(package: Path, snapshot: Snapshot, reconciliation: Reconciliation) -> None:
@@ -97,13 +100,13 @@ def _verify_populated(package: Path, snapshot: Snapshot, reconciliation: Reconci
             )
 
 
-def _back_up(workbook: Path) -> Path:
+def _backup_plan(workbook: Path) -> tuple[Path, tuple[Path, ...]]:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     target = BACKUP_DIR / f"{workbook.stem}-{stamp}{workbook.suffix}"
-    shutil.copy2(workbook, target)
-    prune_ring(BACKUP_DIR, f"{workbook.stem}-*{workbook.suffix}")
-    return target
+    aged = sorted({*BACKUP_DIR.glob(f"{workbook.stem}-*{workbook.suffix}"), target})
+    stale = tuple(aged[: max(0, len(aged) - RING_LIMIT)])
+    return target, stale
 
 
 def _log_export(result: ExportResult) -> None:
@@ -152,10 +155,19 @@ def rebuild_and_publish(source: Path, snapshot: Snapshot, reconciliation: Reconc
             build_one(raw_workbook, with_vba=True)
         recalculate_stage(raw_workbook, calculated_workbook)
         require_semantic_preservation(((raw_workbook, calculated_workbook),))
-        _verify_populated(calculated_workbook, snapshot, reconciliation)
+        _verify_populated(
+            calculated_workbook,
+            reconciliation.normalized_snapshot,
+            reconciliation,
+        )
 
-        backup = _back_up(source)
-        publish_transaction({source: calculated_workbook})
+        backup, stale_backups = _backup_plan(source)
+        publish_transaction(
+            {backup: source, source: calculated_workbook},
+            removals=stale_backups,
+            expected_digests={source: snapshot.workbook_digest},
+            required_absent=(_workbook_lock(source),),
+        )
     return backup
 
 

@@ -13,6 +13,7 @@ from ..core.design import COLORS
 from ..core.formulas import encode_formula
 from ..core.layout import REGISTRY, SpillZone
 from ..spec.capacity import CONFIG_ROWS, DATA_ROWS
+from ..spec.items import DIRECT_BLOCKED_HEALTH_FORMULA
 from .common import Formats
 
 
@@ -99,11 +100,13 @@ def write_calc(ws: Worksheet, fmts: Formats) -> None:
     not_cancelled = "(1-ISNUMBER(XMATCH(tblItems[Status],lstCancelledStatus)))"
     summaries = {
         "AK2": (
-            '=SUMPRODUCT((tblItems[ID]<>"")*(tblItems[Level]>=1)*'
-            "(tblItems[Level]<=cfgExecutiveStatusMaxLevel)*"
+            f"=LET(directblocked,{DIRECT_BLOCKED_HEALTH_FORMULA},"
+            'SUMPRODUCT((tblItems[ID]<>"")*(tblItems[Level]>=1)*'
+            "(((tblItems[Level]<=cfgExecutiveStatusMaxLevel)+"
+            "(tblItems[Delivery Health]=directblocked))>0)*"
             "(1-ISNUMBER(XMATCH(tblItems[Status],lstDoneStatus)))*"
-            "(1-ISNUMBER(XMATCH(tblItems[Status],lstCancelledStatus))))",
-            (),
+            "(1-ISNUMBER(XMATCH(tblItems[Status],lstCancelledStatus)))))",
+            ("directblocked",),
         ),
         "AK3": (
             f'=SUMPRODUCT((tblRAID[Title]<>"")*{raid_open}*{raid_alert}*'

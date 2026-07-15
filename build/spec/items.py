@@ -1,7 +1,8 @@
 """tblItems column spec and supporting table specs.
 
 Each column: (name, kind, fmt, width, dv, formula, vars)
-  kind: I=input, F=formula (consistent calculated column), V=VBA-stamped value
+  kind: I=input, F=formula (consistent calculated column), V=VBA-stamped value,
+        S=system-managed source identity
   fmt:  key into the format factory (writers/common.py)
   dv:   data-validation spec dict or None (applied through DATA_ROWS)
 """
@@ -75,27 +76,42 @@ DATE_OK = {
 DIRECT_BLOCKED_HEALTH_FORMULA = 'LOOKUP(2,1/(dvDeliveryHealth<>""),dvDeliveryHealth)'
 
 
-def raid_rating_validation(title: str, low_label: str, high_label: str) -> dict[str, object]:
-    """Return the shared 1-5 RAID rating contract with an in-cell explanation.
+def raid_rating_validation(
+    title: str,
+    low_label: str,
+    high_label: str,
+    *,
+    cell_reference: str,
+    type_reference: str,
+) -> dict[str, object]:
+    """Return the Config-role-aware RAID rating entry contract.
 
     Returns:
         The XlsxWriter validation settings.
 
     """
     return {
-        "validate": "integer",
-        "criteria": "between",
-        "minimum": 1,
-        "maximum": 5,
+        "validate": "custom",
+        "value": (
+            f'=OR({cell_reference}="",AND(COUNTIFS(dvRaidTypes,{type_reference},'
+            f"dvRaidAlert,TRUE)>0,ISNUMBER({cell_reference}),"
+            f"{cell_reference}=INT({cell_reference}),{cell_reference}>=1,"
+            f"{cell_reference}<=5))"
+        ),
+        "ignore_blank": True,
         "show_input": True,
         "input_title": f"{title} (1-5)",
         "input_message": (
-            f"1 = {low_label}; 5 = {high_label}. Score = Probability \u00d7 Impact (1-25)."
+            f"1 = {low_label}; 5 = {high_label}. Config alert types only "
+            "(Risk and Issue by default). Score = Probability \u00d7 Impact (1-25)."
         ),
         "show_error": True,
         "error_type": "stop",
-        "error_title": f"{title} must be 1-5",
-        "error_message": "Enter a whole number from 1 to 5.",
+        "error_title": f"{title} is not allowed",
+        "error_message": (
+            "Enter a whole number from 1 to 5 for a Config alert type; "
+            "leave this blank for every other type."
+        ),
     }
 
 
@@ -191,42 +207,6 @@ ITEMS_COLUMNS = [
     _c("DoneDate", "V", "date", 12, DATE_OK),
     _c("BlockedSince", "V", "date", 12, DATE_OK),
     _c("LatestUpdateOn", "V", "date", 12, DATE_OK),
-    # ---- schedule envelope (Plan reads these) ---------------------------
-    # EffStart/EffDue: the item's own dates widened to the envelope of every
-    # descendant's dates (min Start / max Due over the Parent + A2..A5 chain).
-    # Parent bars reflect the complete descendant schedule.
-    _c(
-        "EffStart",
-        "F",
-        "calcdate",
-        10,
-        formula='=IF([@ID]="","",IF([@Children]=0,'
-        'IF([@Start]="","",[@Start]),LET(b,DATE(9999,12,31),'
-        's1,MINIFS(tblItems[Start],tblItems[Parent],[@ID],tblItems[Start],">0"),'
-        's2,MINIFS(tblItems[Start],tblItems[A2],[@ID],tblItems[Start],">0"),'
-        's3,MINIFS(tblItems[Start],tblItems[A3],[@ID],tblItems[Start],">0"),'
-        's4,MINIFS(tblItems[Start],tblItems[A4],[@ID],tblItems[Start],">0"),'
-        's5,MINIFS(tblItems[Start],tblItems[A5],[@ID],tblItems[Start],">0"),'
-        'own,IF([@Start]="",b,[@Start]),'
-        "m,MIN(IF(s1=0,b,s1),IF(s2=0,b,s2),IF(s3=0,b,s3),"
-        'IF(s4=0,b,s4),IF(s5=0,b,s5),own),IF(m=b,"",m))))',
-        vars=("b", "s1", "s2", "s3", "s4", "s5", "own", "m"),
-    ),
-    _c(
-        "EffDue",
-        "F",
-        "calcdate",
-        10,
-        formula='=IF([@ID]="","",IF([@Children]=0,'
-        'IF([@Due]="","",[@Due]),LET(m,MAX('
-        "MAXIFS(tblItems[Due],tblItems[Parent],[@ID]),"
-        "MAXIFS(tblItems[Due],tblItems[A2],[@ID]),"
-        "MAXIFS(tblItems[Due],tblItems[A3],[@ID]),"
-        "MAXIFS(tblItems[Due],tblItems[A4],[@ID]),"
-        "MAXIFS(tblItems[Due],tblItems[A5],[@ID]),"
-        'N([@Due])),IF(m=0,"",m))))',
-        vars=("m",),
-    ),
     # A key date has a Due and a blank Start. It renders as a Plan diamond and
     # feeds Overview through the cfgKeyDateMaxLevel boundary.
     _c("IsPoint", "F", "calcbool", 8, formula='=IF([@ID]="",FALSE,AND([@Due]<>"",[@Start]=""))'),
@@ -242,10 +222,14 @@ ITEMS_COLUMNS = [
         14,
         formula='=IF([@ID]="",REPT("Z",50),fnWbsKey([@ID],0))',
     ),
+    # Provider-neutral identity metadata. The bridge owns this pair;
+    # normal workbook entry and VBA never mutate it.
+    _c("Source", "S", "text", 18),
+    _c("Source ID", "S", "text", 18),
 ]
 
 # Core columns form the everyday input surface. Parent identifies the branch
-# used for Scope, ordering and schedule envelopes; calculated and automation
+# used for Scope and ordering; calculated and automation
 # fields occupy one collapsed detail group to the right.
 CORE_VISIBLE = [
     "ID",
@@ -297,14 +281,12 @@ RAID_COLUMNS = [
         "I",
         "int",
         9,
-        raid_rating_validation("Probability", "unlikely", "very likely"),
     ),
     _c(
         "Impact",
         "I",
         "int",
         9,
-        raid_rating_validation("Impact", "low", "severe"),
     ),
     # Severity is the highest ascending tblSeverity band whose MinScore is at
     # or below Score. INDEX/MATCH stores a standard calculated-column formula.
@@ -319,7 +301,14 @@ RAID_COLUMNS = [
     ),
     _c("Response", "I", None, 32, wrap=True),
     _c("NextReview", "I", "date", 14, DATE_OK),
-    _c("Score", "F", "calcint", 6, formula='=IF(OR([@Prob]="",[@Impact]=""),"",[@Prob]*[@Impact])'),
+    _c(
+        "Score",
+        "F",
+        "calcint",
+        6,
+        formula='=IF(OR([@Prob]="",[@Impact]="",COUNTIFS('
+        'dvRaidTypes,[@Type],dvRaidAlert,TRUE)=0),"",[@Prob]*[@Impact])',
+    ),
     _c(
         "Scope",
         "F",
@@ -332,6 +321,8 @@ RAID_COLUMNS = [
     _c("Raised", "V", "date", 12, DATE_OK),
     _c("Closed", "V", "date", 12, DATE_OK),
     _c("Updated", "V", "date", 12, DATE_OK),
+    _c("Source", "S", "text", 18),
+    _c("Source ID", "S", "text", 18),
 ]
 
 RAID_CORE_VISIBLE = [

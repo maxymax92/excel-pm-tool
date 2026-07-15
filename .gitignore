@@ -8,3 +8,4 @@ dist/
 *.repcheck.xls*
 PM_Workbook-*.xlsm
 pkcs11.txt
+/specs/

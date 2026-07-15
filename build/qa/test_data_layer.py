@@ -8,6 +8,11 @@ import unittest
 from datetime import date, datetime, time
 from pathlib import Path
 
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.table import TableColumn, TableFormula
+
 from .. import pipeline
 from ..data.export import (
     ExportError,
@@ -18,7 +23,12 @@ from ..data.export import (
 )
 from ..data.inject import InjectError, injected_source, validate_snapshot
 from ..data.migrate import MigrationError, _require_workbook
-from ..data.schema import EXAMPLE_MARKER, SETTINGS_DEFAULTS, schema_fingerprint
+from ..data.schema import (
+    EXAMPLE_MARKER,
+    SETTINGS_DEFAULTS,
+    TABLES_BY_NAME,
+    schema_fingerprint,
+)
 from ..data.snapshot import (
     RING_LIMIT,
     Snapshot,
@@ -27,7 +37,7 @@ from ..data.snapshot import (
     write_snapshot,
 )
 from ..spec import config, examples
-from ..spec.capacity import DATA_ROWS
+from ..spec.capacity import CONFIG_ROWS, DATA_ROWS
 
 
 def _is_marked(row: dict[str, object]) -> bool:
@@ -54,6 +64,8 @@ ITEM_ROWS = (
         "Start": date(2026, 6, 1),
         "Due": date(2026, 9, 30),
         "Latest Status": "Tracking to plan.",
+        "Source": "api:delivery",
+        "Source ID": "project-3001",
         "Created": date(2026, 5, 20),
         "Updated": date(2026, 7, 10),
         "LatestUpdateOn": date(2026, 7, 10),
@@ -115,8 +127,14 @@ RAID_ROWS = (
 def _config_tables() -> dict[str, tuple[dict[str, object], ...]]:
     return {
         "tblStatuses": tuple(
-            {"Status": status, "IsActive": active, "IsDone": done, "IsCancelled": cancelled}
-            for status, active, done, cancelled in config.STATUSES
+            {
+                "Status": status,
+                "IsActive": active,
+                "IsDone": done,
+                "IsCancelled": cancelled,
+                "IsDeleted": deleted,
+            }
+            for status, active, done, cancelled, deleted in config.STATUSES
         ),
         "tblTypes": (
             *({"Type": name, "Level": level} for name, level in config.TYPES),
@@ -129,7 +147,8 @@ def _config_tables() -> dict[str, tuple[dict[str, object], ...]]:
             for name, alert, decision in config.RAID_TYPES
         ),
         "tblRaidStatuses": tuple(
-            {"RaidStatus": name, "IsClosed": closed} for name, closed in config.RAID_STATUSES
+            {"RaidStatus": name, "IsClosed": closed, "IsDeleted": deleted}
+            for name, closed, deleted in config.RAID_STATUSES
         ),
         "tblSeverity": tuple(
             {"Severity": severity, "MinScore": score} for severity, score in config.SEVERITY
@@ -172,6 +191,75 @@ def _build_exported(directory: str, *, injected: bool) -> ExportResult:
     else:
         pipeline.build_one(workbook, with_vba=False)
     return export_workbook(workbook)
+
+
+def _add_legacy_item_formula_columns(workbook: Path) -> None:
+    """Add the removed schedule-envelope columns to a current workbook fixture."""
+    document = openpyxl.load_workbook(workbook, data_only=False)
+    worksheet = document["Items"]
+    table = worksheet.tables["tblItems"]
+    min_col, header_row, max_col, max_row = range_boundaries(table.ref)
+    headers = {
+        str(worksheet.cell(header_row, column).value) for column in range(min_col, max_col + 1)
+    }
+
+    for name, direct_column in (("EffStart", "Start"), ("EffDue", "Due")):
+        if name in headers:
+            continue
+        max_col += 1
+        worksheet.cell(header_row, max_col, name)
+        formula = f'=IF([@ID]="","",[@{direct_column}])'
+        for row in range(header_row + 1, max_row + 1):
+            worksheet.cell(row, max_col, formula)
+        table.tableColumns.append(
+            TableColumn(
+                id=max(column.id for column in table.tableColumns) + 1,
+                name=name,
+                calculatedColumnFormula=TableFormula(
+                    attr_text=(f'IF([[#This Row],ID]="","",[[#This Row],{direct_column}])')
+                ),
+            )
+        )
+        headers.add(name)
+
+    table.ref = f"{get_column_letter(min_col)}{header_row}:{get_column_letter(max_col)}{max_row}"
+    document.save(workbook)
+
+
+class LegacyFormulaColumnCompatibilityTests(unittest.TestCase):
+    """Keep old calculated columns outside the authored-data contract."""
+
+    def test_obsolete_schedule_formulas_do_not_compromise_round_trip(self) -> None:
+        """Export and reinject authored values around legacy formula-only columns."""
+        source = _snapshot()
+        source_reconciliation = validate_snapshot(source)
+        with tempfile.TemporaryDirectory() as directory:
+            legacy_workbook = Path(directory) / "legacy.xlsx"
+            rebuilt_workbook = Path(directory) / "rebuilt.xlsx"
+            with injected_source(source, source_reconciliation):
+                pipeline.build_one(legacy_workbook, with_vba=False)
+            _add_legacy_item_formula_columns(legacy_workbook)
+
+            exported = export_workbook(legacy_workbook)
+            formula_notes = tuple(note for note in exported.notes if "Eff" in note)
+            self.assertEqual(
+                formula_notes,
+                (
+                    "tblItems[EffStart] is an unknown formula column; not exported",
+                    "tblItems[EffDue] is an unknown formula column; not exported",
+                ),
+            )
+            self.assertNotIn("tblItems", exported.unknown_columns)
+            self.assertEqual(exported.snapshot.tables, source.tables)
+            self.assertEqual(exported.snapshot.settings, source_reconciliation.settings)
+
+            exported_reconciliation = validate_snapshot(exported.snapshot)
+            with injected_source(exported.snapshot, exported_reconciliation):
+                pipeline.build_one(rebuilt_workbook, with_vba=False)
+            rebuilt = export_workbook(rebuilt_workbook)
+
+        self.assertEqual(rebuilt.snapshot.tables, exported.snapshot.tables)
+        self.assertEqual(rebuilt.snapshot.settings, exported.snapshot.settings)
 
 
 class DataRoundTripTests(unittest.TestCase):
@@ -258,6 +346,14 @@ class InjectionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(InjectError, "duplicate ID values: I-3001"):
             validate_snapshot(_snapshot(tables={"tblItems": rows}))
 
+    def test_case_variant_duplicate_ids_halt_like_excel(self) -> None:
+        """Treat workbook identifiers as case-insensitive at the rebuild gate."""
+        first = dict(ITEM_ROWS[0])
+        second = dict(ITEM_ROWS[1])
+        second["ID"] = "i-3001"
+        with self.assertRaisesRegex(InjectError, "duplicate ID values: I-3001"):
+            validate_snapshot(_snapshot(tables={"tblItems": (first, second)}))
+
     def test_orphan_columns_halt(self) -> None:
         """Refuse to drop values from columns outside the schema."""
         row = dict(ITEM_ROWS[0])
@@ -278,6 +374,32 @@ class InjectionGateTests(unittest.TestCase):
         row["Type"] = "Ghost"
         with self.assertRaisesRegex(InjectError, "Ghost"):
             validate_snapshot(_snapshot(tables={"tblItems": (row,)}))
+
+    def test_config_and_identifier_choices_compare_case_insensitively(self) -> None:
+        """Match Excel list and lookup behavior during rebuild validation."""
+        item = dict(ITEM_ROWS[1])
+        item.update({
+            "Type": "workstream",
+            "Status": "in progress",
+            "Owner": "ana ruiz",
+            "Parent": "i-3001",
+        })
+        raid = dict(RAID_ROWS[0])
+        raid.update({
+            "Type": "risk",
+            "Status": "open",
+            "Owner": "ana ruiz",
+            "RelatedID": "i-3001",
+        })
+
+        reconciliation = validate_snapshot(
+            _snapshot(tables={"tblItems": (ITEM_ROWS[0], item), "tblRAID": (raid,)})
+        )
+
+        self.assertFalse(
+            any("outside the configured list" in warning for warning in reconciliation.warnings),
+            reconciliation.warnings,
+        )
 
     def test_capacity_breach_halts(self) -> None:
         """Refuse more rows than every workbook layer supports."""
@@ -315,6 +437,155 @@ class InjectionGateTests(unittest.TestCase):
         del row["Title"]
         with self.assertRaisesRegex(InjectError, "have no Title: I-3001"):
             validate_snapshot(_snapshot(tables={"tblItems": (row,)}))
+
+
+class AuthoredOwnershipTests(unittest.TestCase):
+    """Retain the workbook column owner at the mutation boundary."""
+
+    def test_item_and_raid_schema_retains_column_kinds(self) -> None:
+        """Distinguish inputs, VBA stamps and system identity metadata."""
+        item_columns = {column.name: column.kind for column in TABLES_BY_NAME["tblItems"].columns}
+        raid_columns = {column.name: column.kind for column in TABLES_BY_NAME["tblRAID"].columns}
+        self.assertEqual(item_columns["Title"], "I")
+        self.assertEqual(item_columns["ID"], "V")
+        self.assertEqual(item_columns["Source"], "S")
+        self.assertEqual(item_columns["Source ID"], "S")
+        self.assertEqual(raid_columns["RaidID"], "V")
+        self.assertEqual(raid_columns["Source"], "S")
+        self.assertEqual(raid_columns["Source ID"], "S")
+
+    def test_source_identity_round_trips_with_authored_rows(self) -> None:
+        """Keep source pairs as durable snapshot values."""
+        snapshot = _snapshot()
+        row = snapshot.tables["tblItems"][0]
+        self.assertEqual(row["Source"], "api:delivery")
+        self.assertEqual(row["Source ID"], "project-3001")
+
+
+class DeletedRoleMigrationTests(unittest.TestCase):
+    """Normalize legacy status tables without losing other Config values."""
+
+    @staticmethod
+    def _legacy_statuses() -> tuple[dict[str, object], ...]:
+        return tuple(
+            {
+                "Status": status,
+                "IsActive": active,
+                "IsDone": done,
+                "IsCancelled": cancelled,
+            }
+            for status, active, done, cancelled, deleted in config.STATUSES
+            if not deleted
+        )
+
+    @staticmethod
+    def _legacy_raid_statuses() -> tuple[dict[str, object], ...]:
+        return tuple(
+            {"RaidStatus": status, "IsClosed": closed}
+            for status, closed, deleted in config.RAID_STATUSES
+            if not deleted
+        )
+
+    def test_legacy_tables_gain_exact_deleted_roles(self) -> None:
+        """Append one normal Deleted row to each legacy status table."""
+        legacy_items = self._legacy_statuses()
+        legacy_raid = self._legacy_raid_statuses()
+        reconciliation = validate_snapshot(
+            _snapshot(tables={"tblStatuses": legacy_items, "tblRaidStatuses": legacy_raid})
+        )
+        normalized = reconciliation.normalized_snapshot.tables
+        item_deleted = [row for row in normalized["tblStatuses"] if row["IsDeleted"]]
+        raid_deleted = [row for row in normalized["tblRaidStatuses"] if row["IsDeleted"]]
+        self.assertEqual(
+            item_deleted,
+            [
+                {
+                    "Status": "Deleted",
+                    "IsActive": False,
+                    "IsDone": True,
+                    "IsCancelled": True,
+                    "IsDeleted": True,
+                }
+            ],
+        )
+        self.assertEqual(
+            raid_deleted,
+            [{"RaidStatus": "Deleted", "IsClosed": True, "IsDeleted": True}],
+        )
+        self.assertTrue(any("appended Deleted" in value for value in reconciliation.adjustments))
+        for original, migrated in zip(
+            legacy_items,
+            normalized["tblStatuses"][: len(legacy_items)],
+            strict=True,
+        ):
+            self.assertEqual({**original, "IsDeleted": False}, migrated)
+
+    def test_existing_case_insensitive_label_is_normalized_in_place(self) -> None:
+        """Assign exact roles to one existing Deleted label without appending."""
+        existing = (
+            *self._legacy_statuses(),
+            {
+                "Status": "dElEtEd",
+                "IsActive": True,
+                "IsDone": False,
+                "IsCancelled": False,
+            },
+        )
+        reconciliation = validate_snapshot(_snapshot(tables={"tblStatuses": existing}))
+        rows = reconciliation.normalized_snapshot.tables["tblStatuses"]
+        matching = [row for row in rows if row["IsDeleted"]]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["Status"], "dElEtEd")
+        self.assertEqual(
+            {name: matching[0][name] for name in ("IsActive", "IsDone", "IsCancelled")},
+            {"IsActive": False, "IsDone": True, "IsCancelled": True},
+        )
+        self.assertTrue(any("normalized" in value for value in reconciliation.adjustments))
+
+    def test_ambiguous_deleted_labels_halt(self) -> None:
+        """Refuse to guess between multiple case-insensitive Deleted labels."""
+        rows = (
+            *self._legacy_statuses(),
+            {"Status": "Deleted", "IsActive": False, "IsDone": True, "IsCancelled": True},
+            {"Status": "DELETED", "IsActive": False, "IsDone": True, "IsCancelled": True},
+        )
+        with self.assertRaisesRegex(InjectError, "multiple deletion-role candidates"):
+            validate_snapshot(_snapshot(tables={"tblStatuses": rows}))
+
+    def test_multiple_explicit_deleted_roles_halt(self) -> None:
+        """Require exactly one effective deletion role in current Config."""
+        rows = (
+            {
+                "Status": "Deleted",
+                "IsActive": False,
+                "IsDone": True,
+                "IsCancelled": True,
+                "IsDeleted": True,
+            },
+            {
+                "Status": "Archived",
+                "IsActive": False,
+                "IsDone": True,
+                "IsCancelled": True,
+                "IsDeleted": True,
+            },
+        )
+        with self.assertRaisesRegex(InjectError, "multiple deletion-role candidates"):
+            validate_snapshot(_snapshot(tables={"tblStatuses": rows}))
+
+    def test_deleted_append_respects_config_capacity(self) -> None:
+        """Halt rather than overflow Config when no Deleted row fits."""
+        rows = tuple(
+            {
+                "Status": f"State {index}",
+                "IsActive": False,
+                "IsDone": False,
+                "IsCancelled": False,
+            }
+            for index in range(CONFIG_ROWS)
+        )
+        with self.assertRaisesRegex(InjectError, "cannot append Deleted"):
+            validate_snapshot(_snapshot(tables={"tblStatuses": rows}))
 
 
 class CellCoercionTests(unittest.TestCase):

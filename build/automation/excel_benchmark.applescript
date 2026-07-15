@@ -90,15 +90,15 @@ on run argv
             end repeat
             set selectionFinished to my secondsNow()
 
-            set originalStatus to value of range "L3" of worksheet "Items" of openedWorkbook
+            set originalStatus to value of range "J3" of worksheet "Items" of openedWorkbook
             set editStarted to my secondsNow()
             repeat 10 times
-                set value of range "L3" of worksheet "Items" of openedWorkbook to "Performance probe"
-                set value of range "L3" of worksheet "Items" of openedWorkbook to originalStatus
+                set value of range "J3" of worksheet "Items" of openedWorkbook to "Performance probe"
+                set value of range "J3" of worksheet "Items" of openedWorkbook to originalStatus
             end repeat
             set editFinished to my secondsNow()
 
-            set originalHealth to value of range "F3" of worksheet "Items" of openedWorkbook
+            set originalHealth to value of range "I3" of worksheet "Items" of openedWorkbook
             if (originalHealth as text) is "On track" then
                 set probeHealth to "At risk"
             else
@@ -106,8 +106,8 @@ on run argv
             end if
             set calculationEditStarted to my secondsNow()
             repeat 10 times
-                set value of range "F3" of worksheet "Items" of openedWorkbook to probeHealth
-                set value of range "F3" of worksheet "Items" of openedWorkbook to originalHealth
+                set value of range "I3" of worksheet "Items" of openedWorkbook to probeHealth
+                set value of range "I3" of worksheet "Items" of openedWorkbook to originalHealth
             end repeat
             set calculationEditFinished to my secondsNow()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import sys
 import tempfile
@@ -17,12 +18,18 @@ EXCEL_DOCUMENTS = (
     Path.home() / "Library" / "Containers" / "com.microsoft.Excel" / "Data" / "Documents"
 )
 EXCEL_AUTOMATION_WORKSPACE = EXCEL_DOCUMENTS / "PMWorkbookAutomation"
+EXCEL_FALLBACK_ROOT = Path("/private/tmp")
+LOGGER = logging.getLogger(__name__)
 
 
 class _WorkspaceProblem(Enum):
     DOCUMENTS = "Excel sandbox Documents directory is unavailable: {}"
     CREATE = "cannot create Excel automation workspace {}: {}: {}"
     TEMPORARY = "cannot create a disposable Excel workspace in {}: {}: {}"
+    FALLBACK = (
+        "cannot create a disposable Excel workspace in {} or fallback {}: "
+        "private error {}; fallback error {}: {}"
+    )
     COPY = "cannot copy {} into the Excel automation workspace: {}: {}"
     CLEANUP = "cannot clean Excel automation workspace {}: {}: {}"
 
@@ -59,6 +66,45 @@ def excel_workspace_root() -> Path:
     return EXCEL_AUTOMATION_WORKSPACE
 
 
+def _preferred_working_directory(prefix: str) -> Path:
+    root = excel_workspace_root()
+    try:
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=root))
+    except OSError as error:
+        raise ExcelWorkspaceError(
+            _WorkspaceProblem.TEMPORARY,
+            root,
+            type(error).__name__,
+            error,
+        ) from error
+
+
+def _fallback_working_directory(prefix: str, private_error: ExcelWorkspaceError) -> Path:
+    try:
+        directory = Path(
+            tempfile.mkdtemp(
+                prefix=f"PMWorkbookAutomation.{prefix}",
+                dir=EXCEL_FALLBACK_ROOT,
+            )
+        )
+    except OSError as fallback_error:
+        raise ExcelWorkspaceError(
+            _WorkspaceProblem.FALLBACK,
+            EXCEL_AUTOMATION_WORKSPACE,
+            EXCEL_FALLBACK_ROOT,
+            private_error,
+            type(fallback_error).__name__,
+            fallback_error,
+        ) from private_error
+    LOGGER.warning(
+        "Excel private automation workspace is unavailable (%s); "
+        "using isolated shared temporary directory %s",
+        private_error,
+        directory,
+    )
+    return directory
+
+
 @contextmanager
 def excel_working_directory(prefix: str) -> Iterator[Path]:
     """Yield one isolated directory that Excel can access without a grant prompt.
@@ -70,16 +116,12 @@ def excel_working_directory(prefix: str) -> Iterator[Path]:
         ExcelWorkspaceError: If creation or cleanup fails.
 
     """
-    root = excel_workspace_root()
     try:
-        directory = Path(tempfile.mkdtemp(prefix=prefix, dir=root))
-    except OSError as error:
-        raise ExcelWorkspaceError(
-            _WorkspaceProblem.TEMPORARY,
-            root,
-            type(error).__name__,
-            error,
-        ) from error
+        directory = _preferred_working_directory(prefix)
+    except ExcelWorkspaceError as private_error:
+        if not isinstance(private_error.__cause__, PermissionError):
+            raise
+        directory = _fallback_working_directory(prefix, private_error)
     try:
         yield directory
     finally:
@@ -132,6 +174,7 @@ def excel_workbook_copy(source: Path, *, prefix: str) -> Iterator[Path]:
 
 __all__ = [
     "EXCEL_AUTOMATION_WORKSPACE",
+    "EXCEL_FALLBACK_ROOT",
     "ExcelWorkspaceError",
     "excel_workbook_copy",
     "excel_working_directory",

@@ -31,9 +31,11 @@ The Plan follows a proven Gantt pattern:
 
 - identity columns remain frozen on the left;
 - one weekly date axis drives every timeline cell;
-- Start and Due define interval overlap;
-- Due-only rows render as points;
-- parent rows use descendant date envelopes;
+- every populated item within the selected Scope and Depth remains visible, including undated and Start-only rows;
+- each row's own Start and Due define its interval overlap;
+- a row with its own Due and blank Start renders as a key-date point;
+- blank dates remain blank, and undated or Start-only rows render no bar or point;
+- hierarchy rows never borrow descendant dates, status or other operational values;
 - conditional formatting applies semantic state;
 - the current week and month changes use independent border rules.
 

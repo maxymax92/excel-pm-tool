@@ -34,13 +34,13 @@ LAMBDAS = [
         "fnAncestorAtLevel(fnItemLookup(id,tblItems[Parent]),lvl,d+1)))",
         (),
     ),
-    # Sibling ordering date for the WBS key: effective start, else effective
-    # due, else a far-future sentinel so undated siblings sort last.
+    # Sibling ordering date for the WBS key: the item's own Start, else its own
+    # Due, else a far-future sentinel so undated siblings sort last.
     (
         "fnSortDate",
         ("id",),
-        "LET(s,fnItemLookup(id,tblItems[EffStart]),"
-        "du,fnItemLookup(id,tblItems[EffDue]),"
+        "LET(s,fnItemLookup(id,tblItems[Start]),"
+        "du,fnItemLookup(id,tblItems[Due]),"
         'IF(s<>"",s,IF(du<>"",du,99999999)))',
         ("s", "du"),
     ),

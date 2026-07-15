@@ -84,15 +84,19 @@ A rebuild produces an empty workbook, so structural changes never touch a popula
 
 `export` captures the authored data into `dist/snapshots/` (a bounded ring, newest twenty kept) and both commands default to the root `PM_Workbook.xlsm`. `migrate` exports a snapshot first, rebuilds the workbook from the current source with the same rows injected during the build, then reuses the release pipeline's desktop-Excel recalculation, semantic comparison and rollback-capable publication. The replaced workbook is kept in `dist/backups/` before anything is swapped.
 
-Migration reconciles rather than guesses: rows keep their identifiers, new columns start blank and are reported, the VBA ID counters are raised above every existing identifier, and shipped example rows (the ones marked "EXAMPLE — delete this row") are skipped and counted. Anything that would lose data - out-of-schema columns, settings or tables, duplicate or missing identifiers, rows beyond the supported capacity, item types the taxonomy cannot level - halts before the build with an actionable message. Values the workbook itself flags in red, such as a status outside the configured list, migrate unchanged and are listed as warnings. Excel must have the workbook closed; the same snapshot format is the interchange for importing content from external systems.
+Migration reconciles rather than guesses: rows keep their identifiers and source identities, new columns start blank and are reported, the VBA ID counters are raised above every existing identifier, and shipped example rows (the ones marked "EXAMPLE — delete this row") are skipped and counted. Anything that would lose data - out-of-schema columns, settings or tables, duplicate or missing identifiers, rows beyond the supported capacity, item types the taxonomy cannot level - halts before the build with an actionable message. Values the workbook itself flags in red, such as a status outside the configured list, migrate unchanged and are listed as warnings. Excel must have the workbook closed; the same snapshot format is the interchange for importing content from external systems.
 
-### Import from monday.com
+### Update from any source through an agent
 
 ```bash
-MONDAY_API_TOKEN=... .venv/bin/python -m build.data monday <board-id> [workbook] [--dry-run]
+.venv/bin/python -m build.data describe [workbook] [--output FILE]
+.venv/bin/python -m build.data plan CHANGESET|- [workbook] [--output FILE]
+.venv/bin/python -m build.data apply CHANGESET|- [workbook] --approve PLAN_TOKEN [--output FILE]
 ```
 
-The importer reads one board over monday's GraphQL API - pinned API version, cursor pagination, bounded retries that honor the service's rate-limit signals - and publishes through the same injected rebuild as a migration. A container row holds the board; items and subitems become children with their monday hierarchy preserved, and subitem values map through their own board's column catalogue. Status, Priority, Owner, Due, Start and Timeline map by column title, a monday column titled `Type` may name each item's workbook type, and dates always come from monday's raw UTC values, never from timezone-rendered text. A per-board identifier map under `dist/monday/` keeps re-imports idempotent: mapped items update the monday-owned fields in place (including `Updated`, which tracks monday's last activity), new items receive fresh identifiers, and rows deleted in the workbook stay deleted. Workbook-only fields - Delivery Health, Latest Status, BlockedBy and the workflow stamps - are never touched, and extra co-owners and every other lossy mapping are reported. Clearing follows monday: a Priority, Owner, Start or Due emptied there is cleared in the workbook and reported. Status is the one exception - the importer defaults it on statusless new items, so an empty monday status keeps the workbook value instead of flip-flopping it. If the map is lost, matching titles halt the run instead of duplicating rows (`--allow-duplicates` overrides); an import interrupted mid-publish is detected on the next run with recovery steps. Values outside your Config lists import verbatim and are flagged by the workbook like any other out-of-list entry; `--dry-run` prints the full reconciliation without touching the workbook or writing anything to `dist/`.
+The provider-neutral bridge lets an agent interpret an API, MCP tool, file or pasted text without giving any source a privileged workbook path. `describe` returns the strict JSON contract, current Config choices, records and exact digests. `plan` stays read-only and returns creates, updates, explicit Deleted transitions, no-ops, field diffs, warnings and a token bound to the intended workbook state and local lifecycle date. `apply` reparses and replans the same change set, requires the reviewed token and workbook digest, then uses the existing snapshot, rebuild, desktop-Excel verification and rollback-capable publication pipeline.
+
+Only `Items` and `RAID` input fields can be changed. Source identities are durable system fields; IDs, formulas, lifecycle stamps, Config and People remain workbook-owned. Source omission never means deletion, and no row is physically erased. A true no-op creates no snapshot, backup or build artifact. See the complete contract example and paste-ready agent prompt in the [agent data bridge guide](docs/agent-data-bridge.md).
 
 ## Verify a release
 
@@ -116,7 +120,7 @@ The release gate has two explicit phases. First, run every automated check and c
 build/
   automation/   VBA refresh, Excel recalculation, repair detection and performance measurement
   core/         design tokens, formula encoding, layout and OOXML styling
-  data/         authored-data snapshots, export, injection and migration
+  data/         snapshots, provider-neutral change sets, merge, apply and migration
   qa/           structural, design, scenario, VBA and live-Excel checks
   scenarios/    representative release-data builder
   spec/         workbook schema, capacities, formulas and fixtures
@@ -136,5 +140,6 @@ PM_Workbook.xlsm
 - [Design system](docs/design-system.md)
 - [Excel implementation reference](docs/excel-reference.md)
 - [VBA maintenance](docs/vba-maintenance.md)
+- [Agent data bridge](docs/agent-data-bridge.md)
 - [Tooling and release capabilities](docs/capabilities.md)
 - [Research index](docs/research/excel-2026/README.md)

@@ -56,6 +56,7 @@ EXPECTED_NAMES = {
     "dvStatusActive",
     "dvStatusDone",
     "dvStatusCancelled",
+    "dvStatusDeleted",
     "dvTypes",
     "dvTypeLevels",
     "dvPriorities",
@@ -65,6 +66,7 @@ EXPECTED_NAMES = {
     "dvRaidDecision",
     "dvRaidStatuses",
     "dvRaidClosed",
+    "dvRaidDeleted",
     "dvSeverity",
     "dvSeverityMinScore",
     "dvDeliveryHealth",
@@ -121,7 +123,7 @@ RAID_CORE = [
     "Response",
     "NextReview",
 ]
-RAID_SYSTEM = ["Score", "Scope", "Raised", "Closed", "Updated"]
+RAID_SYSTEM = ["Score", "Scope", "Raised", "Closed", "Updated", "Source", "Source ID"]
 ITEMS_HDR_ROW = 2
 ITEMS_DATA_ROW = 3
 RAID_HDR_ROW = 2

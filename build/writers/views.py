@@ -14,6 +14,7 @@ from ..core.design import ALIGNMENT, COLORS, ROWS, TYPOGRAPHY
 from ..core.formulas import encode_formula
 from ..core.layout import REGISTRY, SpillZone
 from ..spec.capacity import PLAN_ROWS, PLAN_WEEKS
+from ..spec.items import DIRECT_BLOCKED_HEALTH_FORMULA
 from .common import Formats, insert_macro_action, view_chrome
 
 MAX_SPILL_DIMENSIONS = 2
@@ -67,7 +68,7 @@ PANELS = {
     "scopes": (
         0,
         [26, 14, 9, 12],
-        ["Item - Top Level + Lowest Health", "Delivery Health", "Owner", "Due"],
+        ["Item", "Delivery Health", "Owner", "Due"],
     ),
     "risks": (
         5,
@@ -154,28 +155,21 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
     _, body_anchor = _write_overview_frame(ws, fmts)
 
     executive_status = (
-        '=LET(pred,(tblItems[ID]<>"")*(tblItems[Level]>=1)*'
-        "(tblItems[Level]<=cfgExecutiveStatusMaxLevel)*"
+        f"=LET(directblocked,{DIRECT_BLOCKED_HEALTH_FORMULA},"
+        'pred,(tblItems[ID]<>"")*(tblItems[Level]>=1)*'
+        "(((tblItems[Level]<=cfgExecutiveStatusMaxLevel)+"
+        "(tblItems[Delivery Health]=directblocked))>0)*"
         "(1-ISNUMBER(XMATCH(tblItems[Status],lstDoneStatus)))*"
         "(1-ISNUMBER(XMATCH(tblItems[Status],lstCancelledStatus))),"
         'ids,FILTER(tblItems[ID],pred,""),'
         "lv,FILTER(tblItems[Level],pred,0),"
         'typ,FILTER(tblItems[Type],pred,""),'
         'ttl,FILTER(tblItems[Title],pred,""),'
-        'own,FILTER(IF(tblItems[Owner]<>"",tblItems[Owner],'
-        'XLOOKUP(tblItems[Scope],tblItems[ID],tblItems[Owner],"")),pred,""),'
-        'dhealth,MAP(ids,LAMBDA(itemid,IF(itemid="","Not set",LET('
-        "sub,(((tblItems[ID]=itemid)+(tblItems[Scope]=itemid)+(tblItems[Parent]=itemid)+"
-        "(tblItems[A2]=itemid)+(tblItems[A3]=itemid)+"
-        "(tblItems[A4]=itemid)+(tblItems[A5]=itemid))>0)*"
-        "(1-ISNUMBER(XMATCH(tblItems[Status],lstDoneStatus)))*"
-        "(1-ISNUMBER(XMATCH(tblItems[Status],lstCancelledStatus)))*"
-        '(tblItems[Delivery Health]<>""),'
-        "ranks,FILTER(IFNA(XMATCH(tblItems[Delivery Health],dvDeliveryHealth),0),"
-        "sub,0),worst,MAX(ranks),"
-        'IF(worst=0,"Not set",INDEX(dvDeliveryHealth,worst)))))),'
+        'own,FILTER(tblItems[Owner],pred,""),'
+        'dhealth,FILTER(IF(tblItems[Delivery Health]="","Not set",'
+        'tblItems[Delivery Health]),pred,""),'
         "hrank,IFNA(XMATCH(dhealth,dvDeliveryHealth),0),"
-        "due,FILTER(tblItems[EffDue],pred,0),"
+        "due,FILTER(tblItems[Due],pred,0),"
         'wk,FILTER(tblItems[WbsKey],pred,""),'
         't,HSTACK(REPT("\u203a ",IF(lv>1,lv-1,0))&ids&" · "&typ&" · "&ttl,'
         'dhealth,IF(own="","Owner not set",own),'
@@ -192,6 +186,7 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
         5,
         5,
         variables=(
+            "directblocked",
             "pred",
             "ids",
             "lv",
@@ -199,10 +194,6 @@ def write_overview(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> No
             "ttl",
             "own",
             "dhealth",
-            "itemid",
-            "sub",
-            "ranks",
-            "worst",
             "hrank",
             "due",
             "wk",
@@ -757,16 +748,14 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
     _write_plan_controls(ws, fmts)
     left_text, left_date, grid_fmt, axis_month_fmt, axis_week_fmt = _write_plan_axis_frame(ws, fmts)
 
-    # Rows qualify through scope, depth and either a date envelope or key date.
-    # Config levels and role flags supply the business semantics.
+    # Scope and depth determine row inclusion. Schedule completeness only
+    # changes the displayed dates and timeline mark; it never hides an item.
     pred = (
         '(tblItems[ID]<>"")*'
         '(((selPScopeID="All")+(selPScopeID2="All")+(selPScopeID3="All")+'
         "(tblItems[Scope]=selPScopeID)+(tblItems[Scope]=selPScopeID2)+"
         "(tblItems[Scope]=selPScopeID3))>0)*"
-        "(tblItems[Level]<=dp)*"
-        "(((tblItems[IsPoint]=TRUE)+"
-        '((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))>0)'
+        "(tblItems[Level]<=dp)"
     )
     _dyn(
         ws,
@@ -806,7 +795,7 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
     _dyn(
         ws,
         "D6",
-        guard.format("fnItemLookup(A6#,tblItems[EffStart])"),
+        guard.format("fnItemLookup(A6#,tblItems[Start])"),
         PLAN_ROWS,
         fmt=left_date,
         label="plan-start",
@@ -814,7 +803,7 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
     _dyn(
         ws,
         "E6",
-        guard.format("fnItemLookup(A6#,tblItems[EffDue])"),
+        guard.format("fnItemLookup(A6#,tblItems[Due])"),
         PLAN_ROWS,
         fmt=left_date,
         label="plan-due",
@@ -832,7 +821,7 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         "BI6",
         "=LET(ids,A6#,"
         'stt,XLOOKUP(ids,tblItems[ID],tblItems[Status],""),'
-        "ed,XLOOKUP(ids,tblItems[ID],tblItems[EffDue],0),"
+        "ed,XLOOKUP(ids,tblItems[ID],tblItems[Due],0),"
         "cn,ISNUMBER(XMATCH(stt,lstCancelledStatus)),"
         "dn,ISNUMBER(XMATCH(stt,lstDoneStatus)),"
         "ac,ISNUMBER(XMATCH(stt,lstActiveStatus)),"
@@ -851,11 +840,10 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         ws,
         "F5",
         "=LET(ids,A6#,big,DATE(9999,12,31),"
-        'es0,XLOOKUP(ids,tblItems[ID],tblItems[EffStart],""),'
-        'ed0,XLOOKUP(ids,tblItems[ID],tblItems[EffDue],""),'
+        'es0,XLOOKUP(ids,tblItems[ID],tblItems[Start],""),'
         'du0,XLOOKUP(ids,tblItems[ID],tblItems[Due],""),'
         'starts,IF((es0="")+(es0=0),IF((du0="")+(du0=0),big,du0),es0),'
-        'ends,IF((ed0="")+(ed0=0),IF((du0="")+(du0=0),0,du0),ed0),'
+        'ends,IF((du0="")+(du0=0),IF((es0="")+(es0=0),0,es0),du0),'
         "lo0,MIN(starts),hi0,MAX(ends),"
         'lo,IF(selPFrom<>"",selPFrom,IF(lo0>=big,TODAY()-28,lo0-7)),'
         'hi,IF(selPTo<>"",selPTo,IF(hi0=0,TODAY()+56,hi0+7)),'
@@ -868,7 +856,6 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
             "ids",
             "big",
             "es0",
-            "ed0",
             "du0",
             "starts",
             "ends",
@@ -897,19 +884,16 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         ws,
         "F6",
         "=LET(ids,A6#,wk,F5#,ct,BI6#,"
-        'es0,XLOOKUP(ids,tblItems[ID],tblItems[EffStart],""),'
+        'es0,XLOOKUP(ids,tblItems[ID],tblItems[Start],""),'
         'es,IF(es0=0,"",es0),'
-        'ed0,XLOOKUP(ids,tblItems[ID],tblItems[EffDue],""),'
-        'ed,IF(ed0=0,"",ed0),'
         "pt,XLOOKUP(ids,tblItems[ID],tblItems[IsPoint],FALSE),"
         'du0,XLOOKUP(ids,tblItems[ID],tblItems[Due],""),'
         'du,IF(du0=0,"",du0),'
         'glyph,IF(ct="D","✓",IF(ct="A","●",IF(ct="O","!",'
         'IF(ct="C","\u00d7","—")))),'
         'IF((ids="")+(ids="— none —"),"",'
-        'IF(pt=TRUE,IF((du<>"")*(du>=wk)*(du<wk+7),"◆",'
-        'IF((es<>"")*(ed<>"")*(wk+6>=es)*(wk<=ed),glyph,"")),'
-        'IF((es<>"")*(ed<>"")*(wk+6>=es)*(wk<=ed),glyph,""))))',
+        'IF(pt=TRUE,IF((du<>"")*(du>=wk)*(du<wk+7),"◆",""),'
+        'IF((es<>"")*(du<>"")*(wk+6>=es)*(wk<=du),glyph,""))))',
         PLAN_ROWS,
         PLAN_WEEKS,
         variables=(
@@ -918,8 +902,6 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
             "ct",
             "es0",
             "es",
-            "ed0",
-            "ed",
             "pt",
             "du0",
             "du",
@@ -951,42 +933,38 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         '"All",selPScopeID)),'
         'scope2ID,IF(scopeBad,"(unused)",selPScopeID2),'
         'scope3ID,IF(scopeBad,"(unused)",selPScopeID3),'
-        'scheduled,(tblItems[ID]<>"")*'
+        'rowsok,(tblItems[ID]<>"")*'
         '(((scopeID="All")+(scope2ID="All")+(scope3ID="All")+'
         "(tblItems[Scope]=scopeID)+(tblItems[Scope]=scope2ID)+"
         "(tblItems[Scope]=scope3ID))>0)*"
-        "(tblItems[Level]<=dp)*(((tblItems[IsPoint]=TRUE)+"
-        '((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))>0),'
-        "eligible,SUMPRODUCT(scheduled),"
-        'ids,FILTER(tblItems[ID],scheduled,""),big,DATE(9999,12,31),'
-        'es0,XLOOKUP(ids,tblItems[ID],tblItems[EffStart],""),'
-        'ed0,XLOOKUP(ids,tblItems[ID],tblItems[EffDue],""),'
+        "(tblItems[Level]<=dp),"
+        "eligible,SUMPRODUCT(rowsok),"
+        'ids,FILTER(tblItems[ID],rowsok,""),big,DATE(9999,12,31),'
+        'es0,XLOOKUP(ids,tblItems[ID],tblItems[Start],""),'
         'du0,XLOOKUP(ids,tblItems[ID],tblItems[Due],""),'
         'starts,IF((es0="")+(es0=0),IF((du0="")+(du0=0),big,du0),es0),'
-        'ends,IF((ed0="")+(ed0=0),IF((du0="")+(du0=0),0,du0),ed0),'
+        'ends,IF((du0="")+(du0=0),IF((es0="")+(es0=0),0,es0),du0),'
         "lo0,MIN(starts),hi0,MAX(ends),"
         "lo,IF(fromBad,IF(lo0>=big,TODAY()-28,lo0-7),"
         'IF(selPFrom<>"",selPFrom,IF(lo0>=big,TODAY()-28,lo0-7))),'
         "hi,IF(toBad,IF(hi0=0,TODAY()+56,hi0+7),"
         'IF(selPTo<>"",selPTo,IF(hi0=0,TODAY()+56,hi0+7))),'
         "a,lo-WEEKDAY(lo,3),span,ROUNDUP((hi-a+1)/7,0),"
-        'n,SUMPRODUCT((tblItems[ID]<>"")*'
-        '(((scopeID="All")+(scope2ID="All")+(scope3ID="All")+'
-        "(tblItems[Scope]=scopeID)+(tblItems[Scope]=scope2ID)+"
-        "(tblItems[Scope]=scope3ID))>0)*"
-        "(tblItems[Level]<=dp)*"
+        "n,SUMPRODUCT(rowsok*"
         "(1-(tblItems[IsPoint]=TRUE))*"
-        '(1-((tblItems[EffStart]<>"")*(tblItems[EffDue]<>"")))),'
+        '(1-((tblItems[Start]<>"")*(tblItems[Due]<>"")))),'
         'IF(scopeBad,"⚠ Scope is not in the Config-driven list",'
         'IF(depthBad,"⚠ Depth must be a whole number from 1 to 6",'
         'IF(OR(fromBad,toBad),"⚠ From/To must be real dates from 2020 onwards",'
         'IF(orderBad,"⚠ From is after To — correct the reporting window",'
         f'IF(eligible>{PLAN_ROWS},"⚠ "&eligible-{PLAN_ROWS}&'
-        '" scheduled items exceed the supported Plan capacity",'
+        '" items exceed the supported Plan capacity",'
         f'IF(span>{PLAN_WEEKS},"⚠ The requested schedule spans "&span&'
         f'" weeks; Plan shows the first {PLAN_WEEKS}",'
-        'IF(n=0,"","⚠ "&n&IF(n=1," item is"," items are")&" not shown — '
-        'add Start+Due dates, or Due only for a key date"))))))))',
+        'IF(n=0,"","⚠ "&n&IF(n=1," item has"," items have")&'
+        '" incomplete schedule dates — shown without a timeline mark; add '
+        'Start+Due, or Due only for a key date"'
+        "))))))))",
         variables=(
             "scopeBad",
             "depthBad",
@@ -997,12 +975,11 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
             "scopeID",
             "scope2ID",
             "scope3ID",
-            "scheduled",
+            "rowsok",
             "eligible",
             "ids",
             "big",
             "es0",
-            "ed0",
             "du0",
             "starts",
             "ends",
@@ -1016,16 +993,18 @@ def write_plan(wb: Workbook, ws: Worksheet, fmts: Formats) -> None:
         ),
     )
     ws.write_formula("BG3", status_formula, fmts.get("calc"))
+    status_format = fmts.get(
+        None,
+        font_size=TYPOGRAPHY["caption"],
+        font_color=COLORS["text_secondary"],
+        valign="vcenter",
+    )
     ws.merge_range(
         "F2:R2",
-        "=BG3",
-        fmts.get(
-            None,
-            font_size=TYPOGRAPHY["caption"],
-            font_color=COLORS["text_secondary"],
-            valign="vcenter",
-        ),
+        "",
+        status_format,
     )
+    ws.write_formula("F2", "=BG3", status_format)
     ws.conditional_format(
         "F2:R2",
         {

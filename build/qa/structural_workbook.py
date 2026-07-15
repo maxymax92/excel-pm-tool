@@ -91,7 +91,7 @@ def _overview_failures(workbook: Workbook) -> list[str]:
     )
 
     header_sets = {
-        "A2": ["Item - Top Level + Lowest Health", "Delivery Health", "Owner", "Due"],
+        "A2": ["Item", "Delivery Health", "Owner", "Due"],
         "F2": ["Type", "Description", "Severity", "Owner", "Next review", "Latest Status"],
         "M2": ["Milestones / Decisions / Deadlines", "Date", "Scope"],
         "Q2": ["Completed work", "Type", "Owner", "Completed", "Scope"],
@@ -185,7 +185,8 @@ def _example_failures(workbook: Workbook) -> list[str]:
 def _config_failures(workbook: Workbook) -> list[str]:
     worksheet = workbook["Config"]
     expected_headers = {
-        "tblStatuses": ["Status", "IsActive", "IsDone", "IsCancelled"],
+        "tblStatuses": ["Status", "IsActive", "IsDone", "IsCancelled", "IsDeleted"],
+        "tblRaidStatuses": ["RaidStatus", "IsClosed", "IsDeleted"],
         "tblDeliveryHealth": ["Delivery Health"],
         "tblTypes": ["Type", "Level"],
         "tblSeverity": ["Severity", "MinScore"],
@@ -196,15 +197,15 @@ def _config_failures(workbook: Workbook) -> list[str]:
         if table_headers(worksheet, table_name) != wanted
     ]
     expected_refs = {
-        "tblStatuses": "E3:H9",
-        "tblTypes": "J3:K17",
-        "tblPriorities": "M3:M8",
-        "tblTeams": "O3:O4",
-        "tblRaidTypes": "Q3:S8",
-        "tblRaidStatuses": "U3:V6",
-        "tblSeverity": "X3:Y7",
-        "tblDeliveryHealth": "AA3:AA7",
-        "tblPeople": "AC3:AE4",
+        "tblStatuses": "E3:I10",
+        "tblTypes": "K3:L17",
+        "tblPriorities": "N3:N8",
+        "tblTeams": "P3:P4",
+        "tblRaidTypes": "R3:T8",
+        "tblRaidStatuses": "V3:X7",
+        "tblSeverity": "Z3:AA7",
+        "tblDeliveryHealth": "AC3:AC7",
+        "tblPeople": "AE3:AG4",
     }
     failures.extend(
         f"Config {table_name} is {worksheet.tables[table_name].ref}, "

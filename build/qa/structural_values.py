@@ -48,10 +48,13 @@ def _item_checks(worksheet: Worksheet) -> list[ValueCheck]:
         ("I-1004 Level", value(4, "Level"), 2),
         ("I-1003 Scope", value(3, "Scope"), "I-1001"),
         ("I-1004 Scope", value(4, "Scope"), "I-1001"),
-        ("I-1001 EffStart", value(1, "EffStart"), _dt(2026, 6, 15)),
-        ("I-1001 EffDue", value(1, "EffDue"), _dt(2026, 10, 30)),
-        ("I-1002 EffDue", value(2, "EffDue"), _dt(2026, 8, 14)),
-        ("I-1004 EffStart blank", value(4, "EffStart") in {None, ""}, True),
+        ("Items schema has no EffStart", "EffStart" not in columns, True),
+        ("Items schema has no EffDue", "EffDue" not in columns, True),
+        ("I-1001 direct Start", value(1, "Start"), _dt(2026, 6, 15)),
+        ("I-1001 direct Due", value(1, "Due"), _dt(2026, 10, 30)),
+        ("I-1002 direct Due", value(2, "Due"), _dt(2026, 8, 14)),
+        ("I-1004 direct Start blank", value(4, "Start") in {None, ""}, True),
+        ("I-1004 direct Due", value(4, "Due"), _dt(2026, 7, 20)),
         ("I-1004 IsPoint", value(4, "IsPoint"), True),
         ("I-1001 IsPoint", value(1, "IsPoint"), False),
         ("I-1001 WbsKey one segment", len(str(value(1, "WbsKey"))), 13),
@@ -148,6 +151,8 @@ def _overview_checks(worksheet: Worksheet) -> list[ValueCheck]:
 
 
 def _plan_checks(worksheet: Worksheet) -> list[ValueCheck]:
+    key_date_glyphs = [worksheet.cell(row=9, column=column).value for column in range(6, 58)]
+    interval_glyphs = {"\u2713", "\u25cf", "!", "\u00d7", "\u2014"}
     return [
         ("Plan row 1 is the Project", worksheet["A6"].value, "I-1001"),
         ("Plan row 2 is the Epic", worksheet["A7"].value, "I-1002"),
@@ -161,6 +166,13 @@ def _plan_checks(worksheet: Worksheet) -> list[ValueCheck]:
             "            Example completed deliverable",
         ),
         ("Plan point Start blank", worksheet["D9"].value in {None, ""}, True),
+        ("Plan point direct Due", worksheet["E9"].value, _dt(2026, 7, 20)),
+        ("Plan point has exactly one diamond", key_date_glyphs.count("\u25c6"), 1),
+        (
+            "Plan point has no inherited interval glyph",
+            any(glyph in interval_glyphs for glyph in key_date_glyphs),
+            False,
+        ),
         ("Plan level helper", worksheet["BH6"].value, 1),
         ("Plan category helper: done task", worksheet["BI8"].value, "D"),
         ("Plan axis starts 8 Jun", worksheet["F5"].value, _dt(2026, 6, 8)),

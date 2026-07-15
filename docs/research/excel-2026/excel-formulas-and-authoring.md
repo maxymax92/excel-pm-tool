@@ -48,7 +48,7 @@ This keeps the list live while preserving validation through open/save cycles in
 
 ## Event facts and formulas
 
-Created, Updated, InProgressSince, DoneDate, BlockedSince, LatestUpdateOn, Raised and Closed represent events. VBA writes those values. Formulas calculate current health, elapsed time, schedule envelopes, severity, scope and reporting views.
+Created, Updated, InProgressSince, DoneDate, BlockedSince, LatestUpdateOn, Raised and Closed represent events. VBA writes those values. Formulas calculate current health, elapsed time, severity, structural hierarchy metadata, explicit dependency results, RAID scope and reporting views. Operational values remain row-local: formulas do not replace a blank Start, Due, Status, Delivery Health, Owner, Priority, narrative or lifecycle value with one from an ancestor or descendant. Plan still projects every in-scope/depth item; direct Start plus Due produces an interval, direct Due with blank Start produces a key-date diamond, and missing dates remain blank with no bar.
 
 ## Writer and reader roles
 

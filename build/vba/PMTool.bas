@@ -406,6 +406,10 @@ Public Sub ItemStatusRoles(ByVal value As Variant, _
     isCancelled = ConfiguredBoolean( _
         data(rowIndex, ColOf(table, "IsCancelled")), _
         "Status '" & requested & "' IsCancelled", "PMTool.ItemStatusRoles")
+    Dim isDeleted As Boolean
+    isDeleted = ConfiguredBoolean( _
+        data(rowIndex, ColOf(table, "IsDeleted")), _
+        "Status '" & requested & "' IsDeleted", "PMTool.ItemStatusRoles")
     If isActive And isDone Then
         Err.Raise ERROR_BASE + 105, "PMTool.ItemStatusRoles", _
                   "Status '" & requested & _
@@ -416,7 +420,31 @@ Public Sub ItemStatusRoles(ByVal value As Variant, _
                   "Status '" & requested & _
                   "' must be marked done when it is cancelled."
     End If
+    If isDeleted And (isActive Or Not isDone Or Not isCancelled) Then
+        Err.Raise ERROR_BASE + 131, "PMTool.ItemStatusRoles", _
+                  "Status '" & requested & _
+                  "' must be inactive, done and cancelled when it is deleted."
+    End If
 End Sub
+
+Public Function ItemStatusIsDeleted(ByVal value As Variant) As Boolean
+    Dim requested As String
+    requested = ConfiguredText( _
+        value, "Items status", "PMTool.ItemStatusIsDeleted")
+    If Len(requested) = 0 Then Exit Function
+    Dim table As Excel.ListObject
+    Set table = Tbl("tblStatuses")
+    Dim rowIndex As Long
+    rowIndex = TableTextRow( _
+        table, "Status", requested, "Items status", _
+        "PMTool.ItemStatusIsDeleted")
+    Dim data As Variant
+    data = table.DataBodyRange.Value2
+    ItemStatusIsDeleted = ConfiguredBoolean( _
+        data(rowIndex, ColOf(table, "IsDeleted")), _
+        "Status '" & requested & "' IsDeleted", _
+        "PMTool.ItemStatusIsDeleted")
+End Function
 
 Public Function RaidStatusIsClosed(ByVal value As Variant) As Boolean
     Dim requested As String
@@ -435,6 +463,35 @@ Public Function RaidStatusIsClosed(ByVal value As Variant) As Boolean
         data(rowIndex, ColOf(table, "IsClosed")), _
         "RAID status '" & requested & "' IsClosed", _
         "PMTool.RaidStatusIsClosed")
+    Dim isDeleted As Boolean
+    isDeleted = ConfiguredBoolean( _
+        data(rowIndex, ColOf(table, "IsDeleted")), _
+        "RAID status '" & requested & "' IsDeleted", _
+        "PMTool.RaidStatusIsClosed")
+    If isDeleted And Not RaidStatusIsClosed Then
+        Err.Raise ERROR_BASE + 132, "PMTool.RaidStatusIsClosed", _
+                  "RAID status '" & requested & _
+                  "' must be closed when it is deleted."
+    End If
+End Function
+
+Public Function RaidStatusIsDeleted(ByVal value As Variant) As Boolean
+    Dim requested As String
+    requested = ConfiguredText( _
+        value, "RAID status", "PMTool.RaidStatusIsDeleted")
+    If Len(requested) = 0 Then Exit Function
+    Dim table As Excel.ListObject
+    Set table = Tbl("tblRaidStatuses")
+    Dim rowIndex As Long
+    rowIndex = TableTextRow( _
+        table, "RaidStatus", requested, "RAID status", _
+        "PMTool.RaidStatusIsDeleted")
+    Dim data As Variant
+    data = table.DataBodyRange.Value2
+    RaidStatusIsDeleted = ConfiguredBoolean( _
+        data(rowIndex, ColOf(table, "IsDeleted")), _
+        "RAID status '" & requested & "' IsDeleted", _
+        "PMTool.RaidStatusIsDeleted")
 End Function
 
 Public Function IsBlockedDeliveryHealth(ByVal value As Variant) As Boolean

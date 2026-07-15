@@ -129,7 +129,12 @@ def audit() -> list[str]:
                 or (path.suffix.lower() in {".bas", ".txt"} and stripped.startswith("'"))
                 or (path.suffix.lower() == ".applescript" and stripped.startswith("--"))
             )
-            if (path.suffix.lower() == ".md" or is_comment) and JOURNAL_PATTERN.search(line_text):
+            current_state_text = "specs" not in path.parts
+            if (
+                current_state_text
+                and (path.suffix.lower() == ".md" or is_comment)
+                and JOURNAL_PATTERN.search(line_text)
+            ):
                 failures.append(
                     f"{path.relative_to(ROOT)}:{line_number}: repository journal language"
                 )

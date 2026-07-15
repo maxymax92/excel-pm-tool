@@ -34,9 +34,9 @@ LOGGER = logging.getLogger(__name__)
 RELEASE_WORKBOOK = ROOT / "PM_Workbook.xlsm"
 DIST_WORKBOOK = DIST / "PM_Workbook.xlsm"
 QA_WORKBOOK = DIST / "PM_Workbook.xlsx"
-EVIDENCE_SCHEMA = 3
+EVIDENCE_SCHEMA = 4
 EVIDENCE_MAX_AGE = timedelta(hours=24)
-SUPPORTED_EXCEL_TRAIN = "16.110"
+SUPPORTED_EXCEL_TRAIN = "16.111"
 PREPARED_BUT_BLOCKED = 2
 SOURCE_SUFFIXES = {".applescript", ".bas", ".bin", ".md", ".py", ".toml", ".txt"}
 SOURCE_ROOT_FILES = {"README.md", "pyproject.toml", "uv.lock"}
@@ -49,7 +49,9 @@ MIN_MODULE_ARGUMENTS = 2
 LIVE_CHECKS = {
     "all_sheets_visual_inspection",
     "calc_hidden_and_protected",
+    "config_layout_and_deleted_roles",
     "config_in_use_role_edits_rollback",
+    "deleted_rows_visible_and_closed",
     "editable_tables_unprotected",
     "export_button_runs",
     "export_cancel_preserves_files",
@@ -74,6 +76,7 @@ LIVE_CHECKS = {
     "raid_id_created_on_type",
     "raid_lifecycle_stamped",
     "raid_row_presentation_applied",
+    "source_identity_columns_collapsed",
     "vba_project_compiles",
     "workbook_open_maximised",
     "workbook_open_no_repair_notice",
@@ -279,11 +282,25 @@ def _source_gate_matrix() -> tuple[Gate, ...]:
             "build.qa.test_data_layer",
         ),
         _python_gate(
-            "monday.com import contracts",
+            "agent change-set contract and describe",
             "-m",
             "unittest",
             "-q",
-            "build.qa.test_monday_import",
+            "build.qa.test_agent_contract",
+        ),
+        _python_gate(
+            "agent merge and lifecycle contracts",
+            "-m",
+            "unittest",
+            "-q",
+            "build.qa.test_agent_merge",
+        ),
+        _python_gate(
+            "agent plan, apply and publication contracts",
+            "-m",
+            "unittest",
+            "-q",
+            "build.qa.test_agent_apply",
         ),
         _python_gate("VBA source contract", "-m", "build.qa.vba_source"),
         _python_gate("compiled VBA source match", "-m", "build.qa.verify_vba"),
@@ -314,6 +331,7 @@ def _artifact_gate_matrix() -> tuple[Gate, ...]:
             str(DIST_WORKBOOK),
         ),
         _python_gate("empty state", "-m", "build.qa.empty_state"),
+        _python_gate("direct item values", "-m", "build.qa.direct_item_values"),
         _python_gate("formula scenarios", "-m", "build.qa.formula_scenarios"),
         _python_gate("abuse scenarios", "-m", "build.qa.abuse"),
         _python_gate("Overview scenarios", "-m", "build.qa.overview"),

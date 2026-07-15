@@ -1,10 +1,11 @@
 """Authored-data schema shared by export, snapshot, injection and migration.
 
-The registry names every workbook cell a user authors: kind ``I`` (input) and
-kind ``V`` (VBA-stamped) table columns plus the Config settings band. Kind
-``F`` formula columns are never exported or injected; the rebuilt structure
-recomputes them. The schema fingerprint records exactly which shape a snapshot
-was exported under, so cross-version column mapping stays explicit.
+The registry names every durable workbook value: kind ``I`` (input), kind
+``V`` (VBA-stamped) and kind ``S`` (system-managed source identity) table
+columns plus the Config settings band. Kind ``F`` formula columns are never
+exported or injected; the rebuilt structure recomputes them. The schema
+fingerprint records exactly which shape a snapshot was exported under, so
+cross-version column mapping stays explicit.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from ..spec.capacity import CONFIG_ROWS, DATA_ROWS
 from ..spec.items import ITEMS_COLUMNS, RAID_COLUMNS
 
 SCHEMA_FORMAT = 1
-AUTHORED_KINDS = frozenset({"I", "V"})
+AUTHORED_KINDS = frozenset({"I", "S", "V"})
 VALUE_TYPES = frozenset({"text", "int", "date", "bool"})
 
 # The exact copy identifying a shipped delete-me example row in any cell.
@@ -31,6 +32,7 @@ class ColumnSchema:
 
     name: str
     value_type: str
+    kind: str
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -71,7 +73,11 @@ def _data_table(
     specs: list[dict[str, object]],
 ) -> TableSchema:
     columns = tuple(
-        ColumnSchema(name=str(spec["name"]), value_type=_spec_value_type(spec["fmt"]))
+        ColumnSchema(
+            name=str(spec["name"]),
+            value_type=_spec_value_type(spec["fmt"]),
+            kind=str(spec["kind"]),
+        )
         for spec in specs
         if spec["kind"] in AUTHORED_KINDS
     )
@@ -87,7 +93,7 @@ def _data_table(
 
 def _config_table(table: str, key: str, columns: tuple[tuple[str, str], ...]) -> TableSchema:
     schema_columns = tuple(
-        ColumnSchema(name=name, value_type=value_type) for name, value_type in columns
+        ColumnSchema(name=name, value_type=value_type, kind="I") for name, value_type in columns
     )
     return TableSchema(
         sheet="Config",
@@ -110,6 +116,7 @@ DATA_TABLES = (
             ("IsActive", "bool"),
             ("IsDone", "bool"),
             ("IsCancelled", "bool"),
+            ("IsDeleted", "bool"),
         ),
     ),
     _config_table("tblTypes", "Type", (("Type", "text"), ("Level", "int"))),
@@ -123,7 +130,7 @@ DATA_TABLES = (
     _config_table(
         "tblRaidStatuses",
         "RaidStatus",
-        (("RaidStatus", "text"), ("IsClosed", "bool")),
+        (("RaidStatus", "text"), ("IsClosed", "bool"), ("IsDeleted", "bool")),
     ),
     _config_table("tblSeverity", "Severity", (("Severity", "text"), ("MinScore", "int"))),
     _config_table("tblDeliveryHealth", "Delivery Health", (("Delivery Health", "text"),)),
@@ -166,14 +173,17 @@ def key_problems(
         return None, ()
     blank_row: int | None = None
     seen: dict[object, int] = {}
+    labels: dict[object, object] = {}
     for index, row in enumerate(rows, start=1):
         key_value = row.get(key)
         if key_value in {None, ""}:
             if blank_row is None:
                 blank_row = index
             continue
-        seen[key_value] = seen.get(key_value, 0) + 1
-    duplicates = tuple(sorted(str(value) for value, count in seen.items() if count > 1))
+        normalized = key_value.casefold() if isinstance(key_value, str) else key_value
+        labels.setdefault(normalized, key_value)
+        seen[normalized] = seen.get(normalized, 0) + 1
+    duplicates = tuple(sorted(str(labels[value]) for value, count in seen.items() if count > 1))
     return blank_row, duplicates
 
 
@@ -192,7 +202,9 @@ def schema_fingerprint() -> str:
                 "table": table_schema.table,
                 "key": table_schema.key,
                 "capacity": table_schema.capacity,
-                "columns": [[column.name, column.value_type] for column in table_schema.columns],
+                "columns": [
+                    [column.name, column.value_type, column.kind] for column in table_schema.columns
+                ],
                 "workbook_columns": list(table_schema.workbook_columns),
             }
             for table_schema in DATA_TABLES

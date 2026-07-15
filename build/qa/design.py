@@ -48,6 +48,7 @@ from ..core.design import (
 )
 from ..paths import DIST
 from ..spec.capacity import CONFIG_ROWS, DATA_ROWS
+from ..spec.items import DIRECT_BLOCKED_HEALTH_FORMULA
 from ..vba.registry import MODULES
 
 AA_NORMAL_TEXT = 4.5
@@ -814,7 +815,15 @@ def _item_attention_checks(check: SheetCheck, headers: list[object]) -> None:
     ws = check.sheet
     header_letters = {
         name: get_column_letter(headers.index(name) + 1)
-        for name in ("Type", "Parent", "Level", "Children", "Owner", "Delivery Health")
+        for name in (
+            "Type",
+            "Parent",
+            "Level",
+            "Children",
+            "Owner",
+            "Due",
+            "Delivery Health",
+        )
     }
     parent_rules = list(matching_rules(ws, "COUNTIF(dvItemIDs"))
     if not parent_rules:
@@ -827,6 +836,21 @@ def _item_attention_checks(check: SheetCheck, headers: list[object]) -> None:
 
     _item_required_field_rules(check, header_letters, "Owner")
     _item_required_field_rules(check, header_letters, "Delivery Health")
+    due_rules = list(
+        matching_rules(
+            ws,
+            "dvStatusActive",
+            f'${header_letters["Due"]}3=""',
+        )
+    )
+    if not due_rules:
+        check.fails.append(f"{check.path.name}/Items: missing active-work direct Due rule")
+    for rule in due_rules:
+        formula = " ".join(rule.formula or ())
+        if any(token in formula for token in ("EffStart", "EffDue")):
+            check.fails.append(
+                f"{check.path.name}/Items: missing-Due attention uses a schedule envelope"
+            )
 
 
 def _item_required_field_rules(
@@ -913,6 +937,105 @@ def _check_system_fill(
         )
 
 
+def _raid_scoring_rule_checks(check: SheetCheck, header_letters: dict[str, str]) -> None:
+    """Require role-aware scoring cues for alert and non-alert RAID types."""
+    ws = check.sheet
+    for field in ("Prob", "Impact", "Severity"):
+        required_rules = list(matching_rules(ws, "dvRaidAlert", f'${header_letters[field]}3=""'))
+        if not required_rules:
+            check.fails.append(
+                f"{check.path.name}/RAID: alert {field} is not red when scoring is incomplete"
+            )
+            continue
+        required_colours = set().union(*(rule_colours(rule) for rule in required_rules))
+        wanted = {
+            normalise_hex(COLORS["rag_r_bg"]),
+            normalise_hex(COLORS["rag_r_fg"]),
+        }
+        if wanted - required_colours:
+            check.fails.append(
+                f"{check.path.name}/RAID: alert {field} incomplete rule lacks red treatment"
+            )
+
+    not_applicable_rules = list(matching_rules(ws, "dvRaidAlert,TRUE)=0"))
+    if not not_applicable_rules:
+        check.fails.append(
+            f"{check.path.name}/RAID: non-alert scoring cells lack a grey not-applicable rule"
+        )
+    else:
+        actual = set().union(*(rule_colours(rule) for rule in not_applicable_rules))
+        expected = {
+            normalise_hex(COLORS["formula_bg"]),
+            normalise_hex(COLORS["formula_fg"]),
+        }
+        if expected - actual or not any(rule.stopIfTrue for rule in not_applicable_rules):
+            check.fails.append(
+                f"{check.path.name}/RAID: non-alert scoring rule must be grey and stop lower fills"
+            )
+
+
+def _raid_scoring_validation_checks(check: SheetCheck, header_letters: dict[str, str]) -> None:
+    """Require Probability and Impact entry to follow the configured alert role."""
+    for field in ("Prob", "Impact"):
+        coordinate = f"{header_letters[field]}3"
+        rules = validations_covering(check.sheet, coordinate)
+        role_rules = [
+            rule
+            for rule in rules
+            if rule.type == "custom"
+            and "dvRaidAlert" in str(rule.formula1)
+            and "$B3" in str(rule.formula1)
+            and coordinate in str(rule.formula1)
+        ]
+        if not role_rules:
+            check.fails.append(
+                f"{check.path.name}/RAID!{coordinate}: {field} validation does not "
+                "reject scoring for configured non-alert types"
+            )
+            continue
+        if not any(
+            rule.showErrorMessage is True and rule.errorStyle in {None, "stop"}
+            for rule in role_rules
+        ):
+            check.fails.append(
+                f"{check.path.name}/RAID!{coordinate}: role-aware {field} validation "
+                "is not a visible stop-style error"
+            )
+
+
+def _raid_optional_field_checks(check: SheetCheck, header_letters: dict[str, str]) -> None:
+    """Require review-date cues while keeping optional owner and relation cells neutral."""
+    ws = check.sheet
+    review_rules = list(
+        matching_rules(ws, "dvRaidStatuses", f'${header_letters["NextReview"]}3=""')
+    )
+    open_review_rules = [
+        rule
+        for rule in review_rules
+        if "dvRaidAlert" not in " ".join(rule.formula or ())
+        and "dvRaidDecision" not in " ".join(rule.formula or ())
+    ]
+    if not open_review_rules:
+        check.fails.append(
+            f"{check.path.name}/RAID: blank NextReview is not amber for every open RAID type"
+        )
+    else:
+        actual = set().union(*(rule_colours(rule) for rule in open_review_rules))
+        expected = {
+            normalise_hex(COLORS["rag_a_bg"]),
+            normalise_hex(COLORS["rag_a_fg"]),
+        }
+        if expected - actual:
+            check.fails.append(
+                f"{check.path.name}/RAID: blank NextReview rule lacks amber treatment"
+            )
+
+    if list(matching_rules(ws, f'${header_letters["Owner"]}3=""', "dvRaidStatuses")):
+        check.fails.append(f"{check.path.name}/RAID: blank Owner still receives a border cue")
+    if list(matching_rules(ws, f'${header_letters["RelatedID"]}3=""', "dvRaidStatuses")):
+        check.fails.append(f"{check.path.name}/RAID: blank RelatedID is still marked invalid")
+
+
 def _raid_state_checks(check: SheetCheck) -> None:
     """Validate RAID fills, prompts and semantic conditional formatting."""
     ws = check.sheet
@@ -946,6 +1069,10 @@ def _raid_state_checks(check: SheetCheck) -> None:
             f"{check.path.name}/RAID: severity rules do not cover every semantic pair"
         )
     headers = [cell.value for cell in ws[2]]
+    header_letters = {
+        name: get_column_letter(headers.index(name) + 1)
+        for name in ("RelatedID", "Owner", "Prob", "Impact", "Severity", "NextReview")
+    }
     for field in ("Prob", "Impact"):
         coordinate = ws.cell(3, headers.index(field) + 1).coordinate
         expect_input_prompt(
@@ -954,6 +1081,9 @@ def _raid_state_checks(check: SheetCheck) -> None:
             f"{field} rating",
             ("1-5", "Probability \u00d7 Impact", "1-25"),
         )
+    _raid_scoring_rule_checks(check, header_letters)
+    _raid_scoring_validation_checks(check, header_letters)
+    _raid_optional_field_checks(check, header_letters)
     _check_system_fill(check, headers, "Raised", "VBA/system data")
 
 
@@ -965,7 +1095,10 @@ def _formula_text(ws: Worksheet, coordinate: str) -> str:
 
     """
     raw = ws[coordinate].value
-    return str(getattr(raw, "text", raw) or "")
+    formula = str(getattr(raw, "text", raw) or "")
+    for prefix in ("_xlfn.", "_xlws.", "_xlpm."):
+        formula = formula.replace(prefix, "")
+    return formula
 
 
 def _require_formula_tokens(
@@ -999,15 +1132,28 @@ def _overview_state_checks(check: SheetCheck) -> None:
         (
             "cfgExecutiveStatusMaxLevel",
             "tblItems[Level]",
-            "tblItems[Scope]",
-            "tblItems[Parent]",
-            "tblItems[A5]",
+            "tblItems[Delivery Health]",
+            DIRECT_BLOCKED_HEALTH_FORMULA,
             "dvDeliveryHealth",
+            'own,FILTER(tblItems[Owner],pred,"")',
+            "due,FILTER(tblItems[Due],pred,0)",
         ),
     )
+    if any(token in scope_formula for token in ("MAP(ids", "tblItems[A2]=itemid")):
+        check.fails.append(
+            f"{check.path.name}/Overview!A3: scope panel still rolls health from descendants"
+        )
     if "Calc!$N" in scope_formula:
         check.fails.append(
             f"{check.path.name}/Overview!A3: formula references the Calc N-column helper grid"
+        )
+    if "XLOOKUP(tblItems[Scope],tblItems[ID],tblItems[Owner]" in scope_formula:
+        check.fails.append(
+            f"{check.path.name}/Overview!A3: blank Owner still falls back to the scope Owner"
+        )
+    if any(token in scope_formula for token in ("EffStart", "EffDue")):
+        check.fails.append(
+            f"{check.path.name}/Overview!A3: scope panel still uses a schedule envelope"
         )
     _require_formula_tokens(
         check,
@@ -1047,6 +1193,29 @@ def _overview_state_checks(check: SheetCheck) -> None:
 def _plan_state_checks(check: SheetCheck) -> None:
     """Validate Plan glyphs, bars, point dates and ruler formatting."""
     ws = check.sheet
+    row_formula = _formula_text(ws, "A6")
+    if any(
+        token in row_formula for token in ("tblItems[Start]", "tblItems[Due]", "tblItems[IsPoint]")
+    ):
+        check.fails.append(
+            f"{check.path.name}/Plan!A6: row visibility still depends on schedule completeness"
+        )
+    for coordinate, column in (("D6", "Start"), ("E6", "Due")):
+        formula = _formula_text(ws, coordinate)
+        if any(token not in formula for token in ("fnItemLookup", f"tblItems[{column}]")):
+            check.fails.append(
+                f"{check.path.name}/Plan!{coordinate}: displayed {column} is not direct"
+            )
+    for coordinate, tokens, role in (
+        ("BI6", ("tblItems[Status]", "tblItems[Due]"), "category"),
+        ("F5", ("tblItems[Start]", "tblItems[Due]"), "automatic date window"),
+    ):
+        formula = _formula_text(ws, coordinate)
+        check.fails.extend(
+            f"{check.path.name}/Plan!{coordinate}: {role} is missing direct {token}"
+            for token in tokens
+            if token not in formula
+        )
     grid_formula = _formula_text(ws, "F6")
     grid_logic = grid_formula.replace("_xlpm.", "")
     if "wk=INDEX" in grid_formula or "wk = INDEX" in grid_formula:
@@ -1056,10 +1225,13 @@ def _plan_state_checks(check: SheetCheck) -> None:
         for glyph in ("\u2713", "\u25cf", "!", "\u00d7", "\u2014", "\u25c6")
         if glyph not in grid_formula
     )
-    if '(pt=TRUE)*(es="")' in grid_logic:
-        check.fails.append(
-            f"{check.path.name}/Plan!F6: key-date rendering incorrectly depends on EffStart"
-        )
+    check.fails.extend(
+        f"{check.path.name}/Plan!F6: timeline is missing direct {token}"
+        for token in ("tblItems[Start]", "tblItems[Due]", "tblItems[IsPoint]")
+        if token not in grid_formula
+    )
+    if any(token in grid_formula for token in ("EffStart", "EffDue")):
+        check.fails.append(f"{check.path.name}/Plan!F6: timeline uses a schedule envelope")
     if 'IF(pt=TRUE,IF((du<>"")*(du>=wk)*(du<wk+7),"\u25c6"' not in grid_logic:
         check.fails.append(
             f"{check.path.name}/Plan!F6: due-only rows do not prioritize the Due-week diamond"
@@ -1104,8 +1276,8 @@ def _config_state_checks(check: SheetCheck) -> None:
             f"B{setting_rows.get('ExecutiveStatusMaxLevel', 0)}",
             "scope-panel level setting",
         ),
-        ("K4", "type level"),
-        ("Y4", "severity threshold"),
+        ("L4", "type level"),
+        ("AA4", "severity threshold"),
     )
     for coordinate, role in dynamic_coordinates:
         if coordinate == "B0":
@@ -1114,7 +1286,7 @@ def _config_state_checks(check: SheetCheck) -> None:
             expect_stop_validation(check, coordinate, role)
     expect_input_prompt(
         check,
-        "Y4",
+        "AA4",
         "severity threshold",
         ("Probability \u00d7 Impact", "1-25"),
     )
@@ -1303,15 +1475,15 @@ def _plan_component_checks(check: SheetCheck) -> None:
 def _config_table_checks(check: SheetCheck) -> None:
     """Validate Config's parallel table-band layout."""
     expected_refs = {
-        "tblStatuses": "E3:H9",
-        "tblTypes": "J3:K17",
-        "tblPriorities": "M3:M8",
-        "tblTeams": "O3:O4",
-        "tblRaidTypes": "Q3:S8",
-        "tblRaidStatuses": "U3:V6",
-        "tblSeverity": "X3:Y7",
-        "tblDeliveryHealth": "AA3:AA7",
-        "tblPeople": "AC3:AE4",
+        "tblStatuses": "E3:I10",
+        "tblTypes": "K3:L17",
+        "tblPriorities": "N3:N8",
+        "tblTeams": "P3:P4",
+        "tblRaidTypes": "R3:T8",
+        "tblRaidStatuses": "V3:X7",
+        "tblSeverity": "Z3:AA7",
+        "tblDeliveryHealth": "AC3:AC7",
+        "tblPeople": "AE3:AG4",
     }
     for table_name, expected_ref in expected_refs.items():
         table = check.sheet.tables.get(table_name)
@@ -1323,10 +1495,44 @@ def _config_table_checks(check: SheetCheck) -> None:
                 f"expected parallel band {expected_ref}"
             )
 
+    scoring_roles: dict[str, bool] = {}
+    raid_types_table = check.sheet.tables.get("tblRaidTypes")
+    if raid_types_table is not None:
+        min_col, min_row, max_col, max_row = range_boundaries(raid_types_table.ref)
+        header_columns = {
+            str(check.sheet.cell(min_row, column).value): column
+            for column in range(min_col, max_col + 1)
+        }
+        required_headers = {"RaidType", "IsAlert"}
+        if not required_headers.issubset(header_columns):
+            check.fails.append(
+                f"{check.path.name}/Config: tblRaidTypes headers are "
+                f"{sorted(header_columns)!r}; expected {sorted(required_headers)!r}"
+            )
+        else:
+            scoring_roles = {
+                str(check.sheet.cell(row, header_columns["RaidType"]).value): bool(
+                    check.sheet.cell(row, header_columns["IsAlert"]).value
+                )
+                for row in range(min_row + 1, max_row + 1)
+            }
+    expected_scoring_roles = {
+        "Risk": True,
+        "Assumption": False,
+        "Issue": True,
+        "Dependency": False,
+        "Decision": False,
+    }
+    if scoring_roles != expected_scoring_roles:
+        check.fails.append(
+            f"{check.path.name}/Config: shipped RAID scoring roles are {scoring_roles!r}; "
+            f"expected {expected_scoring_roles!r}"
+        )
+
 
 def _config_gutter_checks(check: SheetCheck) -> None:
     """Validate the narrow empty gutters between Config bands."""
-    for gutter in ("D", "I", "L", "N", "P", "T", "W", "Z", "AB", "AF"):
+    for gutter in ("D", "J", "M", "O", "Q", "U", "Y", "AB", "AD", "AH"):
         width = check.sheet.column_dimensions[gutter].width
         if width is None or not math.isclose(float(width), math.e, abs_tol=0.2):
             check.fails.append(
@@ -1355,16 +1561,16 @@ def _config_component_checks(check: SheetCheck) -> None:
         ("A4", "left", "center", "Config label"),
         ("B4", "right", "center", "numeric setting"),
         ("F4", "center", "center", "native role checkbox"),
-        ("J4", "left", "center", "taxonomy text"),
-        ("K4", "right", "center", "taxonomy level"),
+        ("K4", "left", "center", "taxonomy text"),
+        ("L4", "right", "center", "taxonomy level"),
     ):
         expect_alignment(check, coordinate, horizontal, vertical, role)
-    level_rules = validations_covering(ws, "K4")
+    level_rules = validations_covering(ws, "L4")
     if not any(str(rule.formula2) == str(MAX_HIERARCHY_LEVEL) for rule in level_rules):
         check.fails.append(
-            f"{check.path.name}/Config!K4: hierarchy maximum is not {MAX_HIERARCHY_LEVEL}"
+            f"{check.path.name}/Config!L4: hierarchy maximum is not {MAX_HIERARCHY_LEVEL}"
         )
-    health_gap_rules = list(matching_rules(ws, '$AA4=""', f"COUNTA($AA5:$AA${CONFIG_ROWS + 3})>0"))
+    health_gap_rules = list(matching_rules(ws, '$AC4=""', f"COUNTA($AC5:$AC${CONFIG_ROWS + 3})>0"))
     if not any(rule.stopIfTrue is True for rule in health_gap_rules):
         check.fails.append(
             f"{check.path.name}/Config: Delivery Health internal gaps are not guarded"

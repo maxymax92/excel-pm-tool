@@ -10,7 +10,7 @@
 
 The release test uses desktop Excel for calculation, repair detection and compatibility checks.
 
-The current release test environment is Microsoft Excel 365 Personal for Mac, version 16.110. The workbook includes Windows-specific VBA branches for destination selection and path separators, but Windows is not yet part of the release test.
+The current release test environment is Microsoft Excel 365 Personal for Mac, version 16.111. The workbook includes Windows-specific VBA branches for destination selection and path separators, but Windows is not yet part of the release test.
 
 ## Workbook architecture
 
@@ -23,6 +23,8 @@ View: Overview and Plan
 ```
 
 Input tables own editable facts. Calc owns repeatable derivations. Views display bounded projections. VBA owns irreversible event facts such as creation and transition dates.
+
+Operational values are row-local across the architecture: Start, Due, Status, Delivery Health, Owner, Priority, Latest Status and lifecycle dates in a view come only from the displayed `tblItems` row. Hierarchy formulas may derive structural metadata such as ancestors, Level, Scope, Children, WBS grouping and indentation, but never substitute an ancestor's or descendant's operational value. Explicit relationships remain supported: BlockedBy derives dependency state, and RAID RelatedID resolves Scope from the selected item.
 
 ## Formula authoring
 
@@ -37,6 +39,8 @@ Input tables own editable facts. Calc owns repeatable derivations. Views display
 
 Modern functions can require OOXML prefixes. The encoder manages `_xlfn.`, `_xlws.`, `_xlpm.` and spill-anchor storage consistently. New functions require an encoder classification and focused QA coverage.
 
+XlsxWriter automatic string-to-formula and string-to-URL conversion is disabled. All workbook formulas use explicit formula-writing APIs; user and agent text remains literal even when it begins with `=`, `+`, `-` or `@`, or resembles a URL.
+
 `WbsKey` values are digit-only hierarchy paths. Blank Items rows use a high alphabetic text sentinel so Excel for Mac sorts unused capacity after every populated hierarchy row before `OrganiseItems` resizes the table.
 
 ## Tables and calculated columns
@@ -46,6 +50,9 @@ Modern functions can require OOXML prefixes. The encoder manages `_xlfn.`, `_xlw
 - Formula columns use one consistent calculated-column formula.
 - Config list tables always contain at least one body row so structured references remain valid.
 - Editable sheets remain unprotected so table expansion and outline controls work.
+- Item and RAID columns retain input, formula, VBA-stamped and source-identity ownership in `build/data/schema.py`.
+- `Source` and `Source ID` are paired system-managed columns in the collapsed table groups.
+- `tblStatuses` and `tblRaidStatuses` each carry exactly one `IsDeleted` role used by agent deletion, formulas and lifecycle behavior without depending on the displayed label.
 
 ## Data validation
 
@@ -73,13 +80,23 @@ Each semantic color has a text, date, glyph, border or weight cue. Rules use Con
 - Overview emits date text to guarantee stable panel rendering.
 - `TODAY()` is used for relative status and window logic.
 - VBA writes Created, Updated, InProgressSince, DoneDate, BlockedSince, LatestUpdateOn, Raised and Closed.
-- A Due-only item is a point event; an item with Start and Due is a scheduled interval.
+- Plan includes every populated item within the selected Scope and Depth, including undated and Start-only rows.
+- Blank direct dates remain blank and do not produce a schedule bar or point glyph.
+- An item with its own Start and Due is a scheduled interval.
+- An item with its own Due and blank Start is a point event rendered as the key-date diamond.
+- Descendant dates do not populate, widen, sort or classify an ancestor's schedule.
 
 ## OOXML packaging
 
 `build/core/package_style.py` applies the Office theme, window styling and DrawingML macro actions through a temporary package. Publication uses atomic replacement. Package parsing and rewriting use strict UTF-8 and preserve the original exception when cleanup also reports a problem.
 
 The QA twin and macro release share formulas, layout and styling. The macro release additionally contains `xl/vbaProject.bin` and the two authorized DrawingML actions.
+
+## Agent mutation boundary
+
+`build/data/contract.py` owns the closed JSON Schema Draft 2020-12 contract and strict I-JSON parser. `bridge.py` describes workbook state and creates deterministic plans; `merge.py` resolves workbook IDs, source identities and batch-local references; `validation.py` compares baseline and intended finding identities; and `apply.py` enforces the reviewed plan token before the normal rebuild pipeline.
+
+Plan tokens bind the canonical change set, workbook and schema digests, complete intended authored snapshot, warnings, structural adjustments and the local effective-time boundary. Apply replans the same bytes. The publication transaction captures the approved source bytes, validates their SHA-256 again, and commits the calculated workbook and exact pre-change backup together. A true no-op exits before snapshot persistence or build staging.
 
 ## Protection
 

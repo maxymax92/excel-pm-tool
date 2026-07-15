@@ -36,8 +36,10 @@ Private statusNameSnapshotColumn As Long
 Private statusActiveSnapshotColumn As Long
 Private statusDoneSnapshotColumn As Long
 Private statusCancelledSnapshotColumn As Long
+Private statusDeletedSnapshotColumn As Long
 Private raidStatusNameSnapshotColumn As Long
 Private raidStatusClosedSnapshotColumn As Long
+Private raidStatusDeletedSnapshotColumn As Long
 Private deliveryHealthSnapshotColumn As Long
 
 Private Sub Workbook_Open()
@@ -133,22 +135,39 @@ Private Sub ValidateCurrentConfigSemantics()
     Dim isDone As Boolean
     Dim isCancelled As Boolean
     Dim isClosed As Boolean
+    Dim isDeleted As Boolean
+    Dim itemDeletedCount As Long
+    Dim raidDeletedCount As Long
 
     Set table = ConfigTable("tblStatuses")
     For rowIndex = 1 To table.ListRows.Count
         value = table.ListColumns("Status").DataBodyRange.Cells(rowIndex, 1).Value2
         If Not PMTool.IsBlankValue(value) Then
             PMTool.ItemStatusRoles value, isActive, isDone, isCancelled
+            isDeleted = PMTool.ItemStatusIsDeleted(value)
+            If isDeleted Then itemDeletedCount = itemDeletedCount + 1
         End If
     Next rowIndex
+    If itemDeletedCount <> 1 Then
+        Err.Raise ERROR_BASE + 44, _
+                  "ThisWorkbook.ValidateCurrentConfigSemantics", _
+                  "Config requires exactly one deleted Items status."
+    End If
 
     Set table = ConfigTable("tblRaidStatuses")
     For rowIndex = 1 To table.ListRows.Count
         value = table.ListColumns("RaidStatus").DataBodyRange.Cells(rowIndex, 1).Value2
         If Not PMTool.IsBlankValue(value) Then
             isClosed = PMTool.RaidStatusIsClosed(value)
+            isDeleted = PMTool.RaidStatusIsDeleted(value)
+            If isDeleted Then raidDeletedCount = raidDeletedCount + 1
         End If
     Next rowIndex
+    If raidDeletedCount <> 1 Then
+        Err.Raise ERROR_BASE + 45, _
+                  "ThisWorkbook.ValidateCurrentConfigSemantics", _
+                  "Config requires exactly one deleted RAID status."
+    End If
 
     Set table = ConfigTable("tblDeliveryHealth")
     Dim healthCount As Long
@@ -191,10 +210,14 @@ Private Sub CaptureConfigSemantics()
     statusDoneSnapshotColumn = statusTable.ListColumns("IsDone").index
     statusCancelledSnapshotColumn = _
         statusTable.ListColumns("IsCancelled").index
+    statusDeletedSnapshotColumn = _
+        statusTable.ListColumns("IsDeleted").index
     raidStatusNameSnapshotColumn = _
         raidStatusTable.ListColumns("RaidStatus").index
     raidStatusClosedSnapshotColumn = _
         raidStatusTable.ListColumns("IsClosed").index
+    raidStatusDeletedSnapshotColumn = _
+        raidStatusTable.ListColumns("IsDeleted").index
     deliveryHealthSnapshotColumn = _
         healthTable.ListColumns("Delivery Health").index
     configSnapshotReady = True
@@ -272,10 +295,12 @@ Private Sub ValidateUsedItemStatusSemantics()
     Dim currentActiveColumn As Long
     Dim currentDoneColumn As Long
     Dim currentCancelledColumn As Long
+    Dim currentDeletedColumn As Long
     currentNameColumn = statusTable.ListColumns("Status").index
     currentActiveColumn = statusTable.ListColumns("IsActive").index
     currentDoneColumn = statusTable.ListColumns("IsDone").index
     currentCancelledColumn = statusTable.ListColumns("IsCancelled").index
+    currentDeletedColumn = statusTable.ListColumns("IsDeleted").index
 
     Dim usedCell As Excel.Range
     Dim requested As String
@@ -304,7 +329,10 @@ Private Sub ValidateUsedItemStatusSemantics()
                CBool(currentData(currentRow, currentDoneColumn)) Or _
                CBool(statusSnapshot( _
                     oldRow, statusCancelledSnapshotColumn)) <> _
-               CBool(currentData(currentRow, currentCancelledColumn)) Then
+               CBool(currentData(currentRow, currentCancelledColumn)) Or _
+               CBool(statusSnapshot( _
+                    oldRow, statusDeletedSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentDeletedColumn)) Then
                 Err.Raise ERROR_BASE + 36, _
                           "ThisWorkbook.ValidateUsedItemStatusSemantics", _
                           "Items status '" & requested & _
@@ -325,8 +353,10 @@ Private Sub ValidateUsedRaidStatusSemantics()
     currentData = statusTable.DataBodyRange.Value2
     Dim currentNameColumn As Long
     Dim currentClosedColumn As Long
+    Dim currentDeletedColumn As Long
     currentNameColumn = statusTable.ListColumns("RaidStatus").index
     currentClosedColumn = statusTable.ListColumns("IsClosed").index
+    currentDeletedColumn = statusTable.ListColumns("IsDeleted").index
 
     Dim usedCell As Excel.Range
     Dim requested As String
@@ -349,7 +379,10 @@ Private Sub ValidateUsedRaidStatusSemantics()
             End If
             If CBool(raidStatusSnapshot( _
                     oldRow, raidStatusClosedSnapshotColumn)) <> _
-               CBool(currentData(currentRow, currentClosedColumn)) Then
+               CBool(currentData(currentRow, currentClosedColumn)) Or _
+               CBool(raidStatusSnapshot( _
+                    oldRow, raidStatusDeletedSnapshotColumn)) <> _
+               CBool(currentData(currentRow, currentDeletedColumn)) Then
                 Err.Raise ERROR_BASE + 38, _
                           "ThisWorkbook.ValidateUsedRaidStatusSemantics", _
                           "RAID status '" & requested & _
@@ -448,8 +481,10 @@ Private Sub HandleConfigSemanticChange( _
     Dim oldStatusActiveColumn As Long
     Dim oldStatusDoneColumn As Long
     Dim oldStatusCancelledColumn As Long
+    Dim oldStatusDeletedColumn As Long
     Dim oldRaidStatusNameColumn As Long
     Dim oldRaidStatusClosedColumn As Long
+    Dim oldRaidStatusDeletedColumn As Long
     Dim oldHealthColumn As Long
     previousEvents = Application.EnableEvents
     On Error GoTo changeFailure
@@ -462,8 +497,10 @@ Private Sub HandleConfigSemanticChange( _
         oldStatusActiveColumn = statusActiveSnapshotColumn
         oldStatusDoneColumn = statusDoneSnapshotColumn
         oldStatusCancelledColumn = statusCancelledSnapshotColumn
+        oldStatusDeletedColumn = statusDeletedSnapshotColumn
         oldRaidStatusNameColumn = raidStatusNameSnapshotColumn
         oldRaidStatusClosedColumn = raidStatusClosedSnapshotColumn
+        oldRaidStatusDeletedColumn = raidStatusDeletedSnapshotColumn
         oldHealthColumn = deliveryHealthSnapshotColumn
     End If
 
@@ -525,8 +562,10 @@ changeFailure:
             statusActiveSnapshotColumn = oldStatusActiveColumn
             statusDoneSnapshotColumn = oldStatusDoneColumn
             statusCancelledSnapshotColumn = oldStatusCancelledColumn
+            statusDeletedSnapshotColumn = oldStatusDeletedColumn
             raidStatusNameSnapshotColumn = oldRaidStatusNameColumn
             raidStatusClosedSnapshotColumn = oldRaidStatusClosedColumn
+            raidStatusDeletedSnapshotColumn = oldRaidStatusDeletedColumn
             deliveryHealthSnapshotColumn = oldHealthColumn
             configSnapshotReady = True
         ElseIf Not TryCaptureConfigSemantics(recaptureDescription) Then

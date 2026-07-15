@@ -7,6 +7,7 @@ import openpyxl
 
 from ..pipeline import build_one
 from ..spec.config import TYPES
+from ..spec.items import ITEMS_COLUMNS
 from .common import ERROR_VALUE_RE, temporary_examples, temporary_workbook, workbook_error_cells
 from .excel import recalculate
 
@@ -129,7 +130,10 @@ def main() -> int:
                     isinstance(level, int) and MIN_HIERARCHY_LEVEL <= level <= MAX_HIERARCHY_LEVEL
                 ):
                     fails.append(f"Items row {row_index} Level out of bounds: {level!r}")
-                for column in ("Scope", "WbsKey", "EffStart", "EffDue", "WaitingOn"):
+                formula_columns = (
+                    str(column["name"]) for column in ITEMS_COLUMNS if column["kind"] == "F"
+                )
+                for column in formula_columns:
                     value = items.cell(row=row_index, column=columns[column]).value
                     if isinstance(value, str) and ERROR_VALUE_RE.match(value):
                         fails.append(f"Items row {row_index} {column} errored: {value!r}")

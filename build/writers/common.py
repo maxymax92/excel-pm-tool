@@ -433,7 +433,7 @@ def _validate_table_spec(table: TableSpec, fmts: Formats, origin: tuple[int, int
     if len(column_names) != len(set(column_names)):
         msg = f"{table.name} has duplicate column names"
         raise ValueError(msg)
-    allowed_kinds = {"I", "F", "V"}
+    allowed_kinds = {"F", "I", "S", "V"}
     for column in table.columns:
         if column["kind"] not in allowed_kinds:
             msg = f"{table.name}[{column['name']}] has unknown kind {column['kind']!r}"
@@ -456,7 +456,7 @@ def _table_column_specs(fmts: Formats, columns: list[ColumnSpec]) -> list[dict[s
     header_fmt = fmts.table_header()
     column_specs: list[dict[str, object]] = []
     for column in columns:
-        is_system = column["kind"] in {"F", "V"}
+        is_system = column["kind"] in {"F", "S", "V"}
         fmt_extra = {
             "locked": column["kind"] == "F",
             "bg_color": (COLORS["formula_bg"] if is_system else COLORS["input_bg"]),
@@ -502,8 +502,9 @@ def _write_table_examples(
                 continue
             is_identity = offset == 0
             is_literal_cue = isinstance(value, str) and "EXAMPLE" in value.upper()
-            base_bg = COLORS["formula_bg"] if column["kind"] == "V" else COLORS["input_bg"]
-            base_fg = COLORS["formula_fg"] if column["kind"] == "V" else COLORS["text"]
+            is_system = column["kind"] in {"S", "V"}
+            base_bg = COLORS["formula_bg"] if is_system else COLORS["input_bg"]
+            base_fg = COLORS["formula_fg"] if is_system else COLORS["text"]
             cell_format = fmts.get(
                 column["fmt"],
                 bg_color=COLORS["example_bg"] if is_identity else base_bg,
@@ -610,13 +611,13 @@ def view_chrome(
     ws.set_row(1, ROWS["toolbar"])
     ws.merge_range(0, 0, 0, 2, title, fmts.page_title())
     # The current reporting date occupies the metadata zone beside the title.
-    ws.merge_range(
+    metadata_format = fmts.meta()
+    ws.merge_range(0, 3, 0, 4, "", metadata_format)
+    ws.write_formula(
         0,
         3,
-        0,
-        4,
         encode_formula('="As of "&TEXT(TODAY(),"d mmm yyyy")'),
-        fmts.meta(),
+        metadata_format,
     )
     for i, (label, cell, dv_src, default) in enumerate(filters):
         ws.write(1, i * 2, label, fmts.label())

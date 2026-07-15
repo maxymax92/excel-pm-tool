@@ -25,11 +25,10 @@ from .schema import (
     key_problems,
     schema_fingerprint,
 )
+from .snapshot import Snapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-
-    from .snapshot import Snapshot
 
 
 class _InjectProblem(Enum):
@@ -52,6 +51,9 @@ class _InjectProblem(Enum):
     INVALID_LEVEL = "tblTypes levels for used types must be 1-{}: {}"
     MISSING_TYPE = "Items rows have no Type: {}; assign one in the workbook, then re-run"
     MISSING_TITLE = "Items rows have no Title: {}; add one in the workbook, then re-run"
+    DELETED_AMBIGUOUS = "{} has multiple deletion-role candidates: {}"
+    DELETED_CAPACITY = "{} cannot append Deleted because Config capacity is {} rows"
+    RECONCILIATION_SOURCE = "reconciliation does not belong to workbook digest {}"
     RESTORE = "injected build failed and source restoration also failed: {}: {}"
 
 
@@ -74,6 +76,8 @@ class Reconciliation:
     counter_bumps: dict[str, tuple[int, int]]
     empty_tables: tuple[str, ...]
     warnings: tuple[str, ...]
+    adjustments: tuple[str, ...]
+    normalized_snapshot: Snapshot
 
     def lines(self) -> tuple[str, ...]:
         """Return the human reconciliation report.
@@ -99,7 +103,89 @@ class Reconciliation:
             for name, (before, after) in sorted(self.counter_bumps.items())
         )
         lines.extend(f"warning: {warning}" for warning in self.warnings)
+        lines.extend(f"adjustment: {adjustment}" for adjustment in self.adjustments)
         return tuple(lines)
+
+
+_DELETION_TABLES = {
+    "tblStatuses": (
+        "Status",
+        {"IsActive": False, "IsDone": True, "IsCancelled": True, "IsDeleted": True},
+    ),
+    "tblRaidStatuses": (
+        "RaidStatus",
+        {"IsClosed": True, "IsDeleted": True},
+    ),
+}
+
+
+def _normalize_deletion_table(
+    table: str,
+    rows: tuple[dict[str, object], ...],
+) -> tuple[tuple[dict[str, object], ...], tuple[str, ...]]:
+    label_column, required_roles = _DELETION_TABLES[table]
+    normalized = [dict(row) for row in rows]
+    explicit = {index for index, row in enumerate(normalized) if row.get("IsDeleted") is True}
+    named = {
+        index
+        for index, row in enumerate(normalized)
+        if str(row.get(label_column, "")).strip().casefold() == "deleted"
+    }
+    candidates = explicit | named
+    if len(candidates) > 1:
+        labels = ", ".join(str(normalized[index].get(label_column, "")) for index in candidates)
+        raise InjectError(_InjectProblem.DELETED_AMBIGUOUS, table, labels)
+
+    adjustments: list[str] = []
+    missing_flags = sum("IsDeleted" not in row for row in normalized)
+    if missing_flags:
+        adjustments.append(f"{table}: added IsDeleted=False to {missing_flags} existing row(s)")
+
+    appended = not candidates
+    if appended:
+        if len(normalized) >= TABLES_BY_NAME[table].capacity:
+            raise InjectError(
+                _InjectProblem.DELETED_CAPACITY,
+                table,
+                TABLES_BY_NAME[table].capacity,
+            )
+        target = len(normalized)
+        normalized.append({label_column: "Deleted", **required_roles})
+        adjustments.append(f"{table}: appended Deleted with the required deletion roles")
+    else:
+        target = next(iter(candidates))
+
+    for index, row in enumerate(normalized):
+        row["IsDeleted"] = index == target
+    target_row = normalized[target]
+    before = {name: target_row.get(name) for name in required_roles}
+    target_row.update(required_roles)
+    if before != required_roles and not appended:
+        label = target_row.get(label_column, "Deleted")
+        adjustments.append(f"{table} {label}: normalized the required deletion roles")
+    return tuple(normalized), tuple(adjustments)
+
+
+def _normalize_deletion_roles(snapshot: Snapshot) -> tuple[Snapshot, tuple[str, ...]]:
+    tables = {table: tuple(dict(row) for row in rows) for table, rows in snapshot.tables.items()}
+    adjustments: list[str] = []
+    for table in _DELETION_TABLES:
+        normalized, table_adjustments = _normalize_deletion_table(
+            table,
+            tables.get(table, ()),
+        )
+        tables[table] = normalized
+        adjustments.extend(table_adjustments)
+    return (
+        Snapshot(
+            schema_fingerprint=schema_fingerprint(),
+            workbook_digest=snapshot.workbook_digest,
+            exported_at=snapshot.exported_at,
+            settings=dict(snapshot.settings),
+            tables=tables,
+        ),
+        tuple(adjustments),
+    )
 
 
 def _require_schema_tables(snapshot: Snapshot) -> None:
@@ -125,6 +211,17 @@ def _require_table_shape(table: str, rows: tuple[dict[str, object], ...]) -> Non
     if blank_row is not None:
         raise InjectError(_InjectProblem.BLANK_KEY, table, blank_row, table_schema.key)
     if duplicates:
+        if table in _DELETION_TABLES:
+            label_column, _required_roles = _DELETION_TABLES[table]
+            candidates = [
+                row
+                for row in rows
+                if row.get("IsDeleted") is True
+                or str(row.get(label_column, "")).strip().casefold() == "deleted"
+            ]
+            if len(candidates) > 1:
+                labels = ", ".join(str(row.get(label_column, "")) for row in candidates)
+                raise InjectError(_InjectProblem.DELETED_AMBIGUOUS, table, labels)
         raise InjectError(
             _InjectProblem.DUPLICATE_KEY,
             table,
@@ -153,17 +250,22 @@ def _require_buildable_items(snapshot: Snapshot) -> None:
 
 def _require_usable_types(snapshot: Snapshot) -> None:
     items = snapshot.tables.get("tblItems", ())
-    used = {str(row["Type"]) for row in items if row.get("Type") not in {None, ""}}
-    levels = {
-        str(row.get("Type", "")): row.get("Level") for row in snapshot.tables.get("tblTypes", ())
+    used = {
+        str(row["Type"]).casefold(): str(row["Type"])
+        for row in items
+        if row.get("Type") not in {None, ""}
     }
-    unknown = sorted(used - set(levels))
+    levels = {
+        str(row.get("Type", "")).casefold(): row.get("Level")
+        for row in snapshot.tables.get("tblTypes", ())
+    }
+    unknown = sorted(label for folded, label in used.items() if folded not in levels)
     if unknown:
         raise InjectError(_InjectProblem.UNKNOWN_TYPE, ", ".join(unknown))
     invalid = sorted(
-        f"{item_type} (Level {levels[item_type]!r})"
-        for item_type in used
-        if levels[item_type] not in HIERARCHY
+        f"{label} (Level {levels[folded]!r})"
+        for folded, label in used.items()
+        if levels[folded] not in HIERARCHY
     )
     if invalid:
         raise InjectError(_InjectProblem.INVALID_LEVEL, max(HIERARCHY), ", ".join(invalid))
@@ -208,7 +310,9 @@ def _bump_counters(
 
 def _domain(snapshot: Snapshot, table: str, column: str) -> set[str]:
     return {
-        str(row[column]) for row in snapshot.tables.get(table, ()) if row.get(column) is not None
+        str(row[column]).casefold()
+        for row in snapshot.tables.get(table, ())
+        if row.get(column) is not None
     }
 
 
@@ -230,7 +334,7 @@ def _value_warnings(snapshot: Snapshot) -> list[str]:
         table_schema = TABLES_BY_NAME[table]
         for row in snapshot.tables.get(table, ()):
             value = row.get(column)
-            if value in {None, ""} or str(value) in domain:
+            if value in {None, ""} or str(value).casefold() in domain:
                 continue
             label = row.get(table_schema.key or "", "?")
             warnings.append(
@@ -247,31 +351,45 @@ def validate_snapshot(snapshot: Snapshot) -> Reconciliation:
         The validated injection inputs and report material.
 
     """
+    original_fingerprint = snapshot.schema_fingerprint
+    original_tables = set(snapshot.tables)
+    empty_critical = tuple(
+        table
+        for table in ("tblStatuses", "tblTypes", "tblDeliveryHealth", "tblRaidStatuses")
+        if not snapshot.tables.get(table, ())
+    )
     _require_schema_tables(snapshot)
     for table in TABLES_BY_NAME:
         _require_table_shape(table, snapshot.tables.get(table, ()))
+    snapshot, adjustments = _normalize_deletion_roles(snapshot)
     _require_buildable_items(snapshot)
     _require_usable_types(snapshot)
 
     settings, defaulted = _merge_settings(snapshot)
     warnings = _value_warnings(snapshot)
     counter_bumps = _bump_counters(snapshot, settings, warnings)
-    empty_tables = tuple(sorted(set(TABLES_BY_NAME) - set(snapshot.tables)))
-    critical_config = ("tblStatuses", "tblTypes", "tblDeliveryHealth", "tblRaidStatuses")
+    empty_tables = tuple(sorted(set(TABLES_BY_NAME) - original_tables))
     warnings.extend(
-        f"{table} is empty; the workbook loses its workflow behaviour"
-        for table in critical_config
-        if not snapshot.tables.get(table, ())
+        f"{table} is empty; the workbook loses its workflow behaviour" for table in empty_critical
     )
 
+    normalized_snapshot = Snapshot(
+        schema_fingerprint=schema_fingerprint(),
+        workbook_digest=snapshot.workbook_digest,
+        exported_at=snapshot.exported_at,
+        settings=dict(settings),
+        tables=snapshot.tables,
+    )
     return Reconciliation(
-        fingerprint_matches=snapshot.schema_fingerprint == schema_fingerprint(),
+        fingerprint_matches=original_fingerprint == schema_fingerprint(),
         row_counts={table: len(snapshot.tables.get(table, ())) for table in TABLES_BY_NAME},
         settings=settings,
         defaulted_settings=defaulted,
         counter_bumps=counter_bumps,
         empty_tables=empty_tables,
         warnings=tuple(warnings),
+        adjustments=adjustments,
+        normalized_snapshot=normalized_snapshot,
     )
 
 
@@ -330,40 +448,52 @@ def injected_source(snapshot: Snapshot, reconciliation: Reconciliation) -> Itera
     Yields:
         Nothing; the swapped state lives for the context body.
 
+    Raises:
+        InjectError: If the reconciliation belongs to another workbook snapshot.
+
     """
+    effective = reconciliation.normalized_snapshot
+    if effective.workbook_digest != snapshot.workbook_digest:
+        raise InjectError(_InjectProblem.RECONCILIATION_SOURCE, snapshot.workbook_digest)
     replacements: dict[tuple[object, str], object] = {
-        (examples, "ITEMS_EXAMPLES"): [dict(row) for row in snapshot.tables.get("tblItems", ())],
-        (examples, "PEOPLE_EXAMPLES"): [dict(row) for row in snapshot.tables.get("tblPeople", ())],
-        (examples, "RAID_EXAMPLES"): [dict(row) for row in snapshot.tables.get("tblRAID", ())],
+        (examples, "ITEMS_EXAMPLES"): [dict(row) for row in effective.tables.get("tblItems", ())],
+        (examples, "PEOPLE_EXAMPLES"): [dict(row) for row in effective.tables.get("tblPeople", ())],
+        (examples, "RAID_EXAMPLES"): [dict(row) for row in effective.tables.get("tblRAID", ())],
         (config, "SETTINGS"): [
             (name, reconciliation.settings[name], SETTINGS_DESCRIPTIONS[name])
             for name in SETTINGS_DEFAULTS
         ],
         (config, "STATUSES"): _config_rows(
-            snapshot,
+            effective,
             "tblStatuses",
-            (("Status", ""), ("IsActive", False), ("IsDone", False), ("IsCancelled", False)),
+            (
+                ("Status", ""),
+                ("IsActive", False),
+                ("IsDone", False),
+                ("IsCancelled", False),
+                ("IsDeleted", False),
+            ),
         ),
-        (config, "TYPES"): _config_rows(snapshot, "tblTypes", (("Type", ""), ("Level", 0))),
-        (config, "PRIORITIES"): _config_values(snapshot, "tblPriorities", "Priority"),
-        (config, "TEAMS"): _config_values(snapshot, "tblTeams", "Team"),
+        (config, "TYPES"): _config_rows(effective, "tblTypes", (("Type", ""), ("Level", 0))),
+        (config, "PRIORITIES"): _config_values(effective, "tblPriorities", "Priority"),
+        (config, "TEAMS"): _config_values(effective, "tblTeams", "Team"),
         (config, "RAID_TYPES"): _config_rows(
-            snapshot,
+            effective,
             "tblRaidTypes",
             (("RaidType", ""), ("IsAlert", False), ("IsDecision", False)),
         ),
         (config, "RAID_STATUSES"): _config_rows(
-            snapshot,
+            effective,
             "tblRaidStatuses",
-            (("RaidStatus", ""), ("IsClosed", False)),
+            (("RaidStatus", ""), ("IsClosed", False), ("IsDeleted", False)),
         ),
         (config, "SEVERITY"): _config_rows(
-            snapshot,
+            effective,
             "tblSeverity",
             (("Severity", ""), ("MinScore", 0)),
         ),
         (config, "DELIVERY_HEALTH"): _config_values(
-            snapshot,
+            effective,
             "tblDeliveryHealth",
             "Delivery Health",
         ),

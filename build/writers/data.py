@@ -81,15 +81,15 @@ SETTING_BOUNDS = {
 }
 CONFIG_BANDS = {
     "statuses": 4,
-    "types": 9,
-    "priorities": 12,
-    "teams": 14,
-    "raid_types": 16,
-    "raid_statuses": 20,
-    "severity": 23,
-    "delivery_health": 26,
-    "people": 28,
-    "guidance": 32,
+    "types": 10,
+    "priorities": 13,
+    "teams": 15,
+    "raid_types": 17,
+    "raid_statuses": 21,
+    "severity": 25,
+    "delivery_health": 28,
+    "people": 30,
+    "guidance": 34,
 }
 
 
@@ -570,7 +570,7 @@ def write_items(ws: Worksheet, fmts: Formats, *, is_xlsm: bool = False) -> None:
         f"{column_letter('Due')}{first}:{column_letter('Due')}{n}",
         {
             "type": "formula",
-            "criteria": f'=AND({is_active},${column_letter("EffDue")}{first}="")',
+            "criteria": f'=AND({is_active},${column_letter("Due")}{first}="")',
             "format": attention_border,
         },
     )
@@ -611,6 +611,24 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
 
     first = 3
     last = DATA_ROWS + 2
+    for score_name, title, low_label, high_label in (
+        ("Prob", "Probability", "unlikely", "very likely"),
+        ("Impact", "Impact", "low", "severe"),
+    ):
+        score_column = column_letter(score_name)
+        ws.data_validation(
+            first - 1,
+            col[score_name],
+            last - 1,
+            col[score_name],
+            items.raid_rating_validation(
+                title,
+                low_label,
+                high_label,
+                cell_reference=f"{score_column}{first}",
+                type_reference=f"${column_letter('Type')}{first}",
+            ),
+        )
     invalid = fmts.get(
         None,
         bg_color=COLORS["rag_r_bg"],
@@ -618,11 +636,13 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
         border=1,
         border_color=COLORS["rag_r_fg"],
     )
-    attention_border = fmts.wb.add_format({"border": 1, "border_color": COLORS["rag_a_fg"]})
     not_closed = f"COUNTIFS(dvRaidStatuses,${column_letter('Status')}{first},dvRaidClosed,TRUE)=0"
     is_closed = f"COUNTIFS(dvRaidStatuses,${column_letter('Status')}{first},dvRaidClosed,TRUE)>0"
     is_alert = f"COUNTIFS(dvRaidTypes,${column_letter('Type')}{first},dvRaidAlert,TRUE)>0"
-    is_decision = f"COUNTIFS(dvRaidTypes,${column_letter('Type')}{first},dvRaidDecision,TRUE)>0"
+    is_not_alert = (
+        f"AND(COUNTIF(dvRaidTypes,${column_letter('Type')}{first})>0,"
+        f"COUNTIFS(dvRaidTypes,${column_letter('Type')}{first},dvRaidAlert,TRUE)=0)"
+    )
     # Severity is calculated, so the blank-row test uses only editable fields.
     # Partially entered rows still run every validation rule.
     raid_cf_ranges = f"A{first}:C{last} E{first}:Q{last}"
@@ -732,6 +752,7 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
                 "criteria": (
                     f'=AND(${column_letter("RaidID")}{first}<>"",OR('
                     f'AND({is_alert},{cell}=""),'
+                    f'AND({is_not_alert},{cell}<>""),'
                     f'AND({cell}<>"",OR(NOT(ISNUMBER({cell})),'
                     f"{cell}<1,{cell}>5,INT({cell})<>{cell}))))"
                 ),
@@ -761,13 +782,27 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
         {
             "type": "formula",
             "criteria": (
-                f'=AND(${column_letter("RaidID")}{first}<>"",'
-                f'${column_letter("Score")}{first}<>"",OR('
+                f'=AND(${column_letter("RaidID")}{first}<>"",OR('
+                f'AND({is_alert},${column_letter("Severity")}{first}=""),'
+                f'AND(${column_letter("Score")}{first}<>"",OR('
                 f"ISERROR(${column_letter('Severity')}{first}),"
                 f'${column_letter("Severity")}{first}="",IFERROR(COUNTIF('
-                f"dvSeverity,${column_letter('Severity')}{first})=0,TRUE)))"
+                f"dvSeverity,${column_letter('Severity')}{first})=0,TRUE)))))"
             ),
             "format": invalid,
+            "stop_if_true": True,
+        },
+    )
+    ws.conditional_format(
+        f"{column_letter('Prob')}{first}:{column_letter('Severity')}{last}",
+        {
+            "type": "formula",
+            "criteria": (f'=AND(${column_letter("RaidID")}{first}<>"",{is_not_alert})'),
+            "format": fmts.get(
+                None,
+                bg_color=COLORS["formula_bg"],
+                font_color=COLORS["formula_fg"],
+            ),
             "stop_if_true": True,
         },
     )
@@ -878,32 +913,19 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
             ),
         },
     )
-    # Open alert/decision records must stay reviewable and owned. These are
-    # warning cues, while structural omissions above remain red invalid data.
+    # Every open RAID record must stay reviewable. This is an amber attention
+    # cue; invalid nonblank dates remain red through the higher-priority rule.
     ws.conditional_format(
         f"{column_letter('NextReview')}{first}:{column_letter('NextReview')}{last}",
         {
             "type": "formula",
             "criteria": (
                 f'=AND(${column_letter("RaidID")}{first}<>"",{not_closed},'
-                f"OR({is_alert},{is_decision}),"
                 f'${column_letter("NextReview")}{first}="")'
             ),
             "format": fmts.get(
                 None, bg_color=COLORS["rag_a_bg"], font_color=COLORS["rag_a_fg"], bold=True
             ),
-        },
-    )
-    ws.conditional_format(
-        f"{column_letter('Owner')}{first}:{column_letter('Owner')}{last}",
-        {
-            "type": "formula",
-            "criteria": (
-                f'=AND(${column_letter("RaidID")}{first}<>"",{not_closed},'
-                f"OR({is_alert},{is_decision}),"
-                f'${column_letter("Owner")}{first}="")'
-            ),
-            "format": attention_border,
         },
     )
     ws.conditional_format(
@@ -917,22 +939,6 @@ def write_raid(ws: Worksheet, fmts: Formats) -> None:
                 f'${column_letter("Response")}{first}="")'
             ),
             "format": fmts.get(None, bg_color=COLORS["rag_a_bg"], font_color=COLORS["rag_a_fg"]),
-        },
-    )
-    ws.conditional_format(
-        f"{column_letter('RelatedID')}{first}:{column_letter('RelatedID')}{last}",
-        {
-            "type": "formula",
-            "criteria": (
-                f'=AND(${column_letter("Title")}{first}<>"",{not_closed},${column_letter("RelatedID")}{first}="")'
-            ),
-            "format": fmts.get(
-                None,
-                bg_color=COLORS["rag_r_bg"],
-                font_color=COLORS["rag_r_fg"],
-                border=1,
-                border_color=COLORS["rag_r_fg"],
-            ),
         },
     )
     for name in ("Title", "Detail", "Response"):
@@ -1258,19 +1264,25 @@ def _write_config_lists(
         list_ranges,
     )
 
-    # A:C Settings | D gutter | E:H Statuses | I gutter | J:K Types | ...
+    # A:C Settings | D gutter | E:I Statuses | J gutter | K:L Types | ...
     # Each table band has independent widths and one narrow gutter.
-    for gutter in (3, 8, 11, 13, 15, 19, 22, 25, 27, 31):
+    for gutter in (3, 9, 12, 14, 16, 20, 24, 27, 29, 33):
         ws.set_column(gutter, gutter, 2)
 
     list_specs = (
         _ConfigListSpec(
             "tblStatuses",
             CONFIG_BANDS["statuses"],
-            ("Status", "IsActive", "IsDone", "IsCancelled"),
+            ("Status", "IsActive", "IsDone", "IsCancelled", "IsDeleted"),
             config.STATUSES,
-            (16, 12, 11, 16),
-            {0: "dvStatus", 1: "dvStatusActive", 2: "dvStatusDone", 3: "dvStatusCancelled"},
+            (16, 12, 11, 16, 12),
+            {
+                0: "dvStatus",
+                1: "dvStatusActive",
+                2: "dvStatusDone",
+                3: "dvStatusCancelled",
+                4: "dvStatusDeleted",
+            },
         ),
         _ConfigListSpec(
             "tblTypes",
@@ -1307,10 +1319,10 @@ def _write_config_lists(
         _ConfigListSpec(
             "tblRaidStatuses",
             CONFIG_BANDS["raid_statuses"],
-            ("RaidStatus", "IsClosed"),
+            ("RaidStatus", "IsClosed", "IsDeleted"),
             config.RAID_STATUSES,
-            (16, 11),
-            {0: "dvRaidStatuses", 1: "dvRaidClosed"},
+            (16, 11, 12),
+            {0: "dvRaidStatuses", 1: "dvRaidClosed", 2: "dvRaidDeleted"},
         ),
         _ConfigListSpec(
             "tblSeverity",
@@ -1463,12 +1475,28 @@ def _write_config_band_rules(ws: Worksheet, fmts: Formats, base: int) -> None:
             "format": invalid,
         },
     )
+    _write_config_deleted_role_rules(
+        ws,
+        invalid=invalid,
+        start_xl=start_xl,
+        config_end_xl=config_end_xl,
+    )
+
+
+def _write_config_deleted_role_rules(
+    ws: Worksheet,
+    *,
+    invalid: Format,
+    start_xl: int,
+    config_end_xl: int,
+) -> None:
     status_name_col = xl_col_to_name(CONFIG_BANDS["statuses"])
     status_active_col = xl_col_to_name(CONFIG_BANDS["statuses"] + 1)
     status_done_col = xl_col_to_name(CONFIG_BANDS["statuses"] + 2)
     status_cancel_col = xl_col_to_name(CONFIG_BANDS["statuses"] + 3)
+    status_deleted_col = xl_col_to_name(CONFIG_BANDS["statuses"] + 4)
     ws.conditional_format(
-        f"{status_active_col}{start_xl}:{status_cancel_col}{config_end_xl}",
+        f"{status_active_col}{start_xl}:{status_deleted_col}{config_end_xl}",
         {
             "type": "formula",
             "criteria": (
@@ -1476,7 +1504,28 @@ def _write_config_band_rules(ws: Worksheet, fmts: Formats, base: int) -> None:
                 f"AND(${status_active_col}{start_xl}=TRUE,"
                 f"${status_done_col}{start_xl}=TRUE),"
                 f"AND(${status_cancel_col}{start_xl}=TRUE,"
-                f"${status_done_col}{start_xl}<>TRUE)))"
+                f"${status_done_col}{start_xl}<>TRUE),"
+                f"AND(${status_deleted_col}{start_xl}=TRUE,OR("
+                f"${status_active_col}{start_xl}=TRUE,"
+                f"${status_done_col}{start_xl}<>TRUE,"
+                f"${status_cancel_col}{start_xl}<>TRUE)),"
+                "COUNTIF(dvStatusDeleted,TRUE)<>1))"
+            ),
+            "format": invalid,
+        },
+    )
+    raid_name_col = xl_col_to_name(CONFIG_BANDS["raid_statuses"])
+    raid_closed_col = xl_col_to_name(CONFIG_BANDS["raid_statuses"] + 1)
+    raid_deleted_col = xl_col_to_name(CONFIG_BANDS["raid_statuses"] + 2)
+    ws.conditional_format(
+        f"{raid_closed_col}{start_xl}:{raid_deleted_col}{config_end_xl}",
+        {
+            "type": "formula",
+            "criteria": (
+                f'=AND(${raid_name_col}{start_xl}<>"",OR('
+                f"AND(${raid_deleted_col}{start_xl}=TRUE,"
+                f"${raid_closed_col}{start_xl}<>TRUE),"
+                "COUNTIF(dvRaidDeleted,TRUE)<>1))"
             ),
             "format": invalid,
         },
@@ -1503,13 +1552,17 @@ def _write_config_role_rules(ws: Worksheet, fmts: Formats, base: int) -> None:
                 CONFIG_BANDS["statuses"] + 1,
                 CONFIG_BANDS["statuses"] + 2,
                 CONFIG_BANDS["statuses"] + 3,
+                CONFIG_BANDS["statuses"] + 4,
             ),
         ),
         (
             CONFIG_BANDS["raid_types"],
             (CONFIG_BANDS["raid_types"] + 1, CONFIG_BANDS["raid_types"] + 2),
         ),
-        (CONFIG_BANDS["raid_statuses"], (CONFIG_BANDS["raid_statuses"] + 1,)),
+        (
+            CONFIG_BANDS["raid_statuses"],
+            (CONFIG_BANDS["raid_statuses"] + 1, CONFIG_BANDS["raid_statuses"] + 2),
+        ),
     )
     for identity_col, flag_cols in boolean_groups:
         identity = xl_col_to_name(identity_col)

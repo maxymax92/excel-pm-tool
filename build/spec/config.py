@@ -16,7 +16,7 @@ SETTINGS = [
         "cfgExecutiveStatusMaxLevel",
         1,
         "Executive Status Summary shows open items at Levels 1..N; "
-        "health rolls up from open descendants",
+        "directly blocked deeper items also appear; each row keeps its own health",
     ),
     ("cfgKeyDateMaxLevel", 4, "Key dates show on Overview at levels 2..N"),
     ("cfgComingUrgentDays", 3, "Coming Up darkest band ends at N days"),
@@ -31,16 +31,17 @@ SETTINGS = [
 ]
 
 STATUSES = [
-    # Status, IsActive, IsDone, IsCancelled. Row order is display order.
+    # Status, IsActive, IsDone, IsCancelled, IsDeleted. Row order is display order.
     # IsActive stamps InProgressSince and drives active-work signals;
     # IsDone stamps DoneDate and ends attention; IsCancelled marks a done-flagged
     # status that must NOT count as delivered work.
-    ("Backlog", False, False, False),
-    ("Ready", False, False, False),
-    ("In Progress", True, False, False),
-    ("Review", True, False, False),
-    ("Done", False, True, False),
-    ("Cancelled", False, True, True),
+    ("Backlog", False, False, False, False),
+    ("Ready", False, False, False, False),
+    ("In Progress", True, False, False, False),
+    ("Review", True, False, False, False),
+    ("Done", False, True, False, False),
+    ("Cancelled", False, True, True, False),
+    ("Deleted", False, True, True, True),
 ]
 
 # (Type, Level). Levels drive hierarchy indentation, emphasis and the Plan /
@@ -66,19 +67,25 @@ TYPES = [
 PRIORITIES = ["P0", "P1", "P2", "P3", "P4"]  # row order = rank (P0 highest)
 TEAMS = ["Core"]
 
-# (RaidType, IsAlert, IsDecision). IsAlert types feed Top RAID and attention;
-# IsDecision types feed Coming Up when their open rows have a future NextReview.
+# (RaidType, IsAlert, IsDecision). IsAlert types require severity scoring and
+# can feed Top RAID; IsDecision types feed Coming Up when their open rows have
+# a future NextReview.
 RAID_TYPES = [
     ("Risk", True, False),
     ("Assumption", False, False),
     ("Issue", True, False),
-    ("Dependency", True, False),
+    ("Dependency", False, False),
     ("Decision", False, True),
 ]
 
-# (RaidStatus, IsClosed). IsClosed stamps Closed and drops the record from
+# (RaidStatus, IsClosed, IsDeleted). IsClosed stamps Closed and drops the record from
 # every open-RAID view.
-RAID_STATUSES = [("Open", False), ("Monitoring", False), ("Closed", True)]
+RAID_STATUSES = [
+    ("Open", False, False),
+    ("Monitoring", False, False),
+    ("Closed", True, False),
+    ("Deleted", True, True),
+]
 
 # (Severity, MinScore) — ascending severity, ascending MinScore. Severity of a
 # RAID row = the highest band whose MinScore <= Probability x Impact.
@@ -88,7 +95,8 @@ DELIVERY_HEALTH = ["On track", "At risk", "Off track", "Blocked"]
 
 OVERVIEW_RULES = [
     "Executive Status Summary shows open items from Level 1 through "
-    "ExecutiveStatusMaxLevel; each row shows the lowest Delivery Health in its open subtree.",
+    "ExecutiveStatusMaxLevel plus directly blocked deeper items; each row shows only its own "
+    "Delivery Health.",
     "Plan Scope choices remain Level-1 Project/Product rows; changing the "
     "Executive Status Summary depth does not redefine Scope.",
     "Work: set Parent, Priority, Start, Status, Due and Owner.",
@@ -96,7 +104,8 @@ OVERVIEW_RULES = [
     "blocked state. BlockedBy remains available for dependency blockers.",
     "Key dates: give an item a Due date and no Start - it shows as a diamond "
     "on Plan and feeds the Overview outlook.",
-    "RAID: link RelatedID, assign Owner, add Response and set NextReview.",
+    "RAID: RelatedID and Owner are optional; every open row needs NextReview. Alert types "
+    "need Probability and Impact; non-alert rating cells reject entry.",
     "Top RAID shows open alert types only when Score is at or above "
     "AlertSevScore (High/Critical in the shipped bands).",
     "Coming Up merges future Due-only key dates with open decisions that have "

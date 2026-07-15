@@ -20,12 +20,12 @@ The normal workflow is:
 Config is arranged as parallel bands separated by narrow blank columns:
 
 - Settings
-- Statuses and their active/done/cancelled roles
+- Statuses and their active/done/cancelled/deleted roles
 - Types and hierarchy levels
 - Priorities
 - Teams
 - RAID types and alert/decision roles
-- RAID statuses and closed role
+- RAID statuses and closed/deleted roles
 - Severity bands
 - Delivery Health order
 - People
@@ -39,6 +39,8 @@ Start a new row by picking a Type. The workbook assigns the next ID the moment t
 
 For Levels 2 through 6, choose a Parent. Set Start and Due for scheduled work. Set Due alone for a key date. Set Delivery Health on any active row, use Latest Status for the current narrative and Owner for accountability.
 
+Each row owns those operational values. A child or descendant never supplies Start, Due, Status, Delivery Health, Owner, Priority, Latest Status or lifecycle dates to its parent. Hierarchy still derives structural information such as Scope, ancestors, children, indentation and parent-first WBS grouping. BlockedBy remains an explicit dependency reference rather than inherited status.
+
 Blocking has two routes:
 
 - choose **Blocked** in Delivery Health for a direct blocker;
@@ -46,19 +48,23 @@ Blocking has two routes:
 
 Click **Organise rows** after hierarchy changes. The action validates the table, sorts it in parent-first WBS order, applies indentation and font hierarchy, rebuilds the expandable row groups and confirms how many rows were organised.
 
-The advanced group contains derivations and event stamps. Open it to check how a value was derived or inspect lifecycle dates.
+The advanced group contains derivations, event stamps and the system-managed `Source` / `Source ID` pair. Open it to check how a value was derived or inspect lifecycle dates. Leave source identity cells to the agent data bridge; they keep repeated updates tied to the same external record.
 
 ## RAID
 
-Choose a RAID Type. The workbook assigns the RaidID and stamps Raised as soon as the row has data. Enter Title and Detail, link RelatedID, set Owner and Status, then complete Probability and Impact. Both rating cells accept whole numbers from 1 to 5 and show the scale when selected.
+Choose a RAID Type. The workbook assigns the RaidID and stamps Raised as soon as the row has data. Enter Title, Detail and Status, then set NextReview; every open row without a review date is amber. RelatedID is optional: select an Items row when the RAID record should resolve Scope from that explicit relationship, or leave it blank for an unscoped RAID record. Owner is also optional, while any nonblank RelatedID or Owner must match its Config-backed list.
 
-Score is `Probability × Impact`, so the range is 1 to 25. Severity uses the highest Config band whose MinScore is no greater than the score. The shipped bands are Low 1-3, Medium 4-8, High 9-15 and Critical 16-25; a 5 × 5 record scores 25, so its Severity is Critical.
+Config alert types require Probability and Impact. In the shipped setup these are Risk and Issue. Both rating cells accept whole numbers from 1 to 5 and show the scale when selected; Severity is red until the scoring pair is complete. Assumption, Dependency and Decision do not need scoring: their Probability, Impact and Severity cells are grey, and stop validation prevents normal entry in Probability or Impact. Pasted ratings are highlighted red and do not produce a Score. Score is `Probability × Impact`, so the range is 1 to 25. Severity uses the highest Config band whose MinScore is no greater than the score. The shipped bands are Low 1-3, Medium 4-8, High 9-15 and Critical 16-25; a 5 × 5 record scores 25, so its Severity is Critical.
 
 Open alert types with scores at or above the configured threshold appear in Top RAID. Open decision types with a current or future NextReview date appear in Coming Up.
+
+RAID's collapsed system group also carries `Source` and `Source ID`. The normal `Deleted` status closes a record while keeping it visible for review.
 
 ## Overview
 
 Overview is a one-page status brief with four panels. Every panel is derived from Items, RAID and Config and shows up to five records.
+
+Executive Status Summary normally includes open items through the configured maximum level, with directly blocked deeper items included as exceptions. Every row shows only that item's own Delivery Health, Owner and Due. A child’s On track, At risk, Off track, Blocked, owner or schedule never changes the values shown for an ancestor.
 
 Coming Up contains key dates from Level 2 through the configured maximum, plus open decision reviews, when their date is today or later. It uses four Config-defined urgency bands, and the exact date remains visible in every band. Overdue dates stay visible as exceptions in Items and RAID rather than appearing in Coming Up.
 
@@ -77,6 +83,8 @@ Use the controls at the top:
 
 Blank From and To use the displayed work’s own date range with a week of padding. The legend shares the top row with the title.
 
+Plan shows every populated item within the selected Scope and Depth, including undated and Start-only rows. Its Start, Due, status and schedule marks always come from that item's own row. Blank dates remain blank. A row with both Start and Due draws an interval bar; a row with its own Due and a blank Start is a key date and draws `◆`; an undated or Start-only row draws no bar or key-date glyph. Dates or status on descendants never alter an ancestor's Plan row.
+
 Plan marks states with both color and glyph:
 
 - `✓` done
@@ -87,11 +95,13 @@ Plan marks states with both color and glyph:
 - `◆` key date
 - vertical rule for the current week
 
-The status rail reports invalid controls, capacity limits and work lacking usable schedule dates.
+The status rail reports invalid controls, capacity limits and visible work lacking complete schedule dates.
 
-## Upgrades and imports
+## Upgrades and agent updates
 
-A newer workbook version never asks you to re-enter data. With the workbook closed in Excel, `python -m build.data migrate` re-renders it from the current source with your rows, Config lists and settings injected, keeps the replaced file in `dist/backups/` and a JSON snapshot of your data in `dist/snapshots/`, and prints exactly what changed. `python -m build.data monday <board-id>` pulls a monday.com board into Items the same way; add `--dry-run` to preview the result first. Both commands report every skipped example row, defaulted setting and value the workbook flags in red - nothing is dropped or corrected silently.
+A newer workbook version never asks you to re-enter data. With the workbook closed in Excel, `python -m build.data migrate` re-renders it from the current source with your rows, Config lists and settings injected, keeps the replaced file in `dist/backups/` and a JSON snapshot of your data in `dist/snapshots/`, and prints exactly what changed. The command reports every skipped example row, defaulted setting and value the workbook flags in red - nothing is dropped or corrected silently.
+
+For agent-assisted updates, run `describe`, give the agent the source material, and have it produce a strict change set. `plan` shows the exact creates, updates, explicit Deleted transitions, no-ops, warnings and field diffs without writing the workbook. Review the plan token and expiry, then run `apply` with that exact token. Source omission never deletes anything. `mark_deleted` changes only the named row's status, and a later reappearance creates a fresh workbook row while retaining the Deleted row as history. Follow the [agent data bridge guide](agent-data-bridge.md) for the complete workflow and paste-ready prompt.
 
 ## Error handling
 

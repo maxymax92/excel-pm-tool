@@ -17,9 +17,12 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from openpyxl.utils import get_column_letter
+
 from ..automation.workspace import excel_workbook_copy
 from ..paths import AUTOMATION
 from ..pipeline import build_one
+from ..spec.items import ITEMS_COLUMNS
 from .common import temporary_examples, temporary_workbook
 from .excel import recalculate
 
@@ -43,6 +46,15 @@ EXPECTED_METRICS = set(LIMITS_MS) | {"OPEN_RETRIES", "CALCULATION_RESTORED"}
 OSASCRIPT = Path("/usr/bin/osascript")
 MIN_SCALE_ROWS = 2
 EXPECTED_ARG_COUNT = 2
+
+
+def _item_data_cell(column_name: str) -> str:
+    column_index = next(
+        index
+        for index, column in enumerate(ITEMS_COLUMNS, start=1)
+        if column["name"] == column_name
+    )
+    return f"{get_column_letter(column_index)}3"
 
 
 def benchmark_contract_failures() -> list[str]:
@@ -75,6 +87,25 @@ def benchmark_contract_failures() -> list[str]:
             "calculation restore failed:",
         )
         if token not in failure_path
+    )
+    latest_status = _item_data_cell("Latest Status")
+    delivery_health = _item_data_cell("Delivery Health")
+    intended_edit_tokens = (
+        f'set originalStatus to value of range "{latest_status}"',
+        f'set value of range "{latest_status}" of worksheet "Items" '
+        'of openedWorkbook to "Performance probe"',
+        f'set value of range "{latest_status}" of worksheet "Items" '
+        "of openedWorkbook to originalStatus",
+        f'set originalHealth to value of range "{delivery_health}"',
+        f'set value of range "{delivery_health}" of worksheet "Items" '
+        "of openedWorkbook to probeHealth",
+        f'set value of range "{delivery_health}" of worksheet "Items" '
+        "of openedWorkbook to originalHealth",
+    )
+    failures.extend(
+        f"Excel benchmark does not target the current Items column: {token}"
+        for token in intended_edit_tokens
+        if token not in source
     )
     return failures
 

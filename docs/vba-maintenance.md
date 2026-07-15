@@ -48,6 +48,8 @@ Use a fresh disposable copy of the generated `PM_Workbook.xlsm`. Confirm its SHA
 - Overview, Plan, Items, RAID, Config and the hidden-state behavior of Calc match the current design system.
 - Text is readable and aligned by data type; headers, filters, controls, conditional states, outlines and the Plan grid are not clipped or displaced.
 - Empty capacity has no decorative ruled rows, unexplained lines or conditional fill.
+- Items columns L:AL and RAID columns M:S open as one collapsed system group; Source and Source ID are the final paired columns and remain readable when expanded.
+- Config uses the current parallel-band layout. Item and RAID status tables each show exactly one checked IsDeleted role with the shipped Deleted row behavior.
 
 ### Workbook open
 
@@ -65,6 +67,7 @@ Use a fresh disposable copy of the generated `PM_Workbook.xlsm`. Confirm its SHA
 - Active status entry stamps InProgressSince once.
 - Delivered done entry stamps DoneDate once.
 - Cancelled status clears DoneDate.
+- Deleted status leaves the Item row visible, uses inactive/done/cancelled behavior and does not create delivered progress.
 - Selecting Blocked in Delivery Health sets BlockedSince; choosing another state clears it.
 - Latest Status edits stamp LatestUpdateOn and clearing the narrative clears the stamp.
 - No Items edit is rejected or undone, including bulk pastes. A pasted status or Delivery Health value that Config does not define skips its role stamps and stays flagged by the invalid-input formatting.
@@ -75,6 +78,7 @@ Use a fresh disposable copy of the generated `PM_Workbook.xlsm`. Confirm its SHA
 - Picking a Type on a row without a RaidID assigns the next well-formed unique RaidID; the first entry stamps Raised and Updated.
 - A populated row takes the wrapped RAID row height with top-aligned Title, Detail and Response; an emptied row returns to the compact height.
 - Closing stamps Closed and reopening clears it.
+- Deleted status stamps Closed, keeps the RAID row visible and excludes it from open RAID views.
 - No RAID edit is rejected or undone. A status that Config does not define skips the Closed stamp and stays flagged by the invalid-input formatting.
 - Clearing every input cell in a row clears its lifecycle stamps.
 

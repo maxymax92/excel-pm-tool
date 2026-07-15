@@ -9,6 +9,7 @@ occur, and dates come back as datetimes that must be pure dates.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import Enum
@@ -63,6 +64,7 @@ class ExportResult:
     added_columns: dict[str, tuple[str, ...]]
     unknown_columns: dict[str, tuple[str, ...]]
     notes: tuple[str, ...]
+    workbook_schema_fingerprint: str
 
 
 def read_table(worksheet: Worksheet, table_name: str) -> tuple[list[str], list[list[object]]]:
@@ -291,6 +293,61 @@ def _find_settings_band(worksheet: Worksheet) -> int:
     raise ExportError(_ExportProblem.SETTINGS_BAND)
 
 
+def _observed_setting_names(worksheet: Worksheet) -> list[str]:
+    header_row = _find_settings_band(worksheet)
+    names: list[str] = []
+    for row in range(header_row + 1, worksheet.max_row + 2):
+        label = worksheet.cell(row, 1).value
+        if label in {None, ""}:
+            break
+        names.append(f"cfg{label}")
+    return names
+
+
+def observed_schema_fingerprint(workbook: Workbook) -> str:
+    """Hash the table headers and setting names observed in one workbook.
+
+    Returns:
+        A stable SHA-256 digest of workbook-owned schema shape, excluding row
+        counts and values so ordinary authored-data edits do not change it.
+
+    Raises:
+        ExportError: If a required sheet, table or settings band is missing.
+
+    """
+    tables: list[dict[str, object]] = []
+    for table_schema in DATA_TABLES:
+        if table_schema.sheet not in workbook.sheetnames:
+            raise ExportError(
+                _ExportProblem.MISSING_SHEET,
+                workbook.properties.title or "workbook",
+                table_schema.sheet,
+            )
+        headers, _rows = read_table(
+            workbook[table_schema.sheet],
+            table_schema.table,
+        )
+        tables.append({
+            "sheet": table_schema.sheet,
+            "table": table_schema.table,
+            "columns": headers,
+        })
+    if "Config" not in workbook.sheetnames:
+        raise ExportError(_ExportProblem.MISSING_SHEET, "workbook", "Config")
+    description = {
+        "format": 1,
+        "tables": tables,
+        "settings": _observed_setting_names(workbook["Config"]),
+    }
+    canonical = json.dumps(
+        description,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _coerce_setting(name: str, value: object) -> object:
     value_type = SETTINGS_TYPES.get(name)
     if value_type is None:
@@ -365,6 +422,7 @@ def export_workbook(path: Path) -> ExportResult:
     if "Config" not in workbook.sheetnames:
         raise ExportError(_ExportProblem.MISSING_SHEET, path.name, "Config")
     settings = export_settings(workbook["Config"])
+    workbook_fingerprint = observed_schema_fingerprint(workbook)
 
     snapshot = Snapshot(
         schema_fingerprint=schema_fingerprint(),
@@ -379,4 +437,5 @@ def export_workbook(path: Path) -> ExportResult:
         added_columns=added_columns,
         unknown_columns=unknown_columns,
         notes=tuple(notes),
+        workbook_schema_fingerprint=workbook_fingerprint,
     )

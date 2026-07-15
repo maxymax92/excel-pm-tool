@@ -47,8 +47,8 @@ if TYPE_CHECKING:
 AS_OF = date(2026, 7, 13)
 OUTPUT = DIST / "PM_Workbook_Ship_Demo.xlsm"
 LOGGER = logging.getLogger(__name__)
-EXPECTED_ITEM_COUNT = 30
-EXPECTED_RAID_COUNT = 9
+EXPECTED_ITEM_COUNT = 31
+EXPECTED_RAID_COUNT = 10
 MIN_KEY_DATE_LEVEL = 2
 EXPECTED_HIERARCHY_LEVELS = 6
 EXPECTED_RECENT_COUNT = 6
@@ -97,6 +97,8 @@ class ItemSeed:
     updated: int = -1
     latest_on: int | None = -1
     done: int | None = None
+    source: str = ""
+    source_id: str = ""
 
 
 def _item(seed: ItemSeed) -> dict[str, object]:
@@ -108,6 +110,8 @@ def _item(seed: ItemSeed) -> dict[str, object]:
         "Priority": seed.priority,
         "Owner": seed.owner,
         "Latest Status": seed.latest,
+        "Source": seed.source,
+        "Source ID": seed.source_id,
         "Created": d(-90),
         "Updated": d(seed.updated),
     }
@@ -571,6 +575,24 @@ ITEMS = [
             done=-12,
         )
     ),
+    _item(
+        ItemSeed(
+            item_id="I-3006",
+            title="Retired reconciliation prototype",
+            item_type="Task",
+            status="Deleted",
+            priority="P3",
+            owner="Nia Okafor",
+            latest="Historical prototype retained for source traceability.",
+            parent="I-3003",
+            start=-45,
+            due=-35,
+            updated=-30,
+            latest_on=-30,
+            source="demo:archive",
+            source_id="reconciliation-prototype-v1",
+        )
+    ),
 ]
 
 
@@ -719,6 +741,23 @@ RAID = [
         "Closed": d(-5),
         "Updated": d(-5),
     },
+    {
+        "RaidID": "R-010",
+        "Type": "Assumption",
+        "Title": "Retired prototype capacity assumption",
+        "Detail": "The superseded prototype assumed one reconciliation shift.",
+        "RelatedID": "I-3006",
+        "Owner": "Nia Okafor",
+        "Status": "Deleted",
+        "Prob": 2,
+        "Impact": 2,
+        "Response": "Retained as historical context; no current response is required.",
+        "Raised": d(-50),
+        "Closed": d(-30),
+        "Updated": d(-30),
+        "Source": "demo:archive",
+        "Source ID": "prototype-capacity-assumption-v1",
+    },
 ]
 
 
@@ -734,8 +773,8 @@ SETTING_OVERRIDES = {
     "cfgComingNearDays": 30,
     "cfgComingHorizonDays": 60,
     "cfgAlertSevScore": 9,
-    "cfgNextItemID": 3006,
-    "cfgNextRaidID": 10,
+    "cfgNextItemID": 3007,
+    "cfgNextRaidID": 11,
 }
 
 
@@ -841,7 +880,7 @@ def _source_qa() -> None:
     _require(any(row.get("BlockedBy") for row in ITEMS), "dependency blocker is not represented")
 
     raid_type_roles = {name: (alert, decision) for name, alert, decision in config.RAID_TYPES}
-    closed_statuses = {name for name, closed in config.RAID_STATUSES if closed}
+    closed_statuses = {name for name, closed, _deleted in config.RAID_STATUSES if closed}
     _require(
         {row["Type"] for row in RAID} == set(raid_type_roles),
         "all configured RAID types are not represented",
@@ -861,12 +900,14 @@ def _source_qa() -> None:
         and row["Prob"] * row["Impact"] >= SETTING_OVERRIDES["cfgAlertSevScore"]
     ]
     _require(
-        top_raid == ["R-001", "R-002", "R-003", "R-004"],
+        top_raid == ["R-001", "R-002", "R-004"],
         f"unexpected Top RAID source set: {top_raid}",
     )
 
-    done_statuses = {name for name, _active, done, _cancelled in config.STATUSES if done}
-    cancelled = {name for name, _active, _done, is_cancelled in config.STATUSES if is_cancelled}
+    done_statuses = {name for name, _active, done, _cancelled, _deleted in config.STATUSES if done}
+    cancelled = {
+        name for name, _active, _done, is_cancelled, _deleted in config.STATUSES if is_cancelled
+    }
     item_events = [
         (row["Due"], row["ID"])
         for row in ITEMS

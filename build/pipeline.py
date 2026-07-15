@@ -16,6 +16,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
+from hashlib import sha256
 from pathlib import Path
 from stat import S_IMODE
 from typing import TYPE_CHECKING
@@ -75,6 +76,16 @@ class _PipelineProblem(Enum):
     IDENTICAL_SOURCE = "publication source and destination are identical: {}"
     NON_FILE_DESTINATION = "publication destination is not a file: {}"
     PREPARATION_CLEANUP = "release publication preparation failed and cleanup also failed: {}"
+    PRECONDITION_TARGET = "publication digest preconditions name non-targets: {}"
+    PRECONDITION_MISMATCH = (
+        "publication target {} failed its SHA-256 precondition; expected {}, observed {}"
+    )
+    PRECONDITION_READ = "publication target {} could not be read for its precondition: {}"
+    PRECONDITION_PRESENT = "publication precondition path exists: {}"
+    PRECONDITION_PATH_READ = "publication precondition path {} could not be checked: {}"
+    PRECONDITION_CLEANUP = (
+        "publication precondition failed and prepared-file cleanup also failed: {}"
+    )
     ROLLBACK_CLEANUP = "rollback of {} failed and rollback-file cleanup also failed: {}"
     PUBLICATION_RECOVERED = "release publication failed; every destination was restored"
     PUBLICATION_DAMAGED = "release publication failed; {}"
@@ -102,6 +113,10 @@ class WorkbookBuildError(BuildPipelineError):
 
 class PublicationError(BuildPipelineError):
     """Report a failed transactional publication or rollback."""
+
+
+class PublicationPreconditionError(BuildPipelineError):
+    """Report a changed publication target before any destination mutation."""
 
 
 class SemanticPreservationError(BuildPipelineError):
@@ -234,6 +249,8 @@ def _new_workbook(path: Path) -> Workbook:
         {
             "use_future_functions": False,
             "default_date_format": "dd mmm yyyy",
+            "strings_to_formulas": False,
+            "strings_to_urls": False,
         },
     )
     workbook.formats[0].set_font_name(FONT["font_name"])
@@ -512,6 +529,69 @@ def _publication_snapshots(plan: PublicationPlan) -> dict[Path, PublicationSnaps
     return snapshots
 
 
+def _expected_publication_digests(
+    plan: PublicationPlan,
+    expected_digests: Mapping[str | Path, str],
+) -> dict[Path, str]:
+    expected = {Path(target): digest for target, digest in expected_digests.items()}
+    unknown = sorted(set(expected) - set(plan.targets))
+    if unknown:
+        raise PublicationConfigurationError(
+            _PipelineProblem.PRECONDITION_TARGET,
+            ", ".join(str(path) for path in unknown),
+        )
+    return expected
+
+
+def _require_publication_digest(target: Path, data: bytes | None, expected: str) -> None:
+    observed = "<missing>" if data is None else sha256(data).hexdigest()
+    if observed != expected:
+        raise PublicationPreconditionError(
+            _PipelineProblem.PRECONDITION_MISMATCH,
+            target,
+            expected,
+            observed,
+        )
+
+
+def _require_snapshot_preconditions(
+    snapshots: Mapping[Path, PublicationSnapshot],
+    expected: Mapping[Path, str],
+) -> None:
+    for target, digest in expected.items():
+        _require_publication_digest(target, snapshots[target].data, digest)
+
+
+def _require_live_preconditions(expected: Mapping[Path, str]) -> None:
+    for target, digest in expected.items():
+        try:
+            data = target.read_bytes() if target.exists() else None
+        except OSError as error:
+            raise PublicationPreconditionError(
+                _PipelineProblem.PRECONDITION_READ,
+                target,
+                error,
+            ) from error
+        _require_publication_digest(target, data, digest)
+
+
+def _require_absent_preconditions(paths: Iterable[Path]) -> None:
+    for path in paths:
+        try:
+            present = path.exists()
+        except OSError as error:
+            raise PublicationPreconditionError(
+                _PipelineProblem.PRECONDITION_PATH_READ,
+                path,
+                error,
+            ) from error
+        if present:
+            raise PublicationPreconditionError(
+                _PipelineProblem.PRECONDITION_PRESENT,
+                path,
+            )
+
+
 def _prepare_publication(plan: PublicationPlan) -> dict[Path, Path]:
     prepared: dict[Path, Path] = {}
     try:
@@ -589,13 +669,36 @@ def publish_transaction(
     replacements: Mapping[str | Path, str | Path],
     *,
     removals: Iterable[str | Path] = (),
+    expected_digests: Mapping[str | Path, str] | None = None,
+    required_absent: Iterable[str | Path] = (),
 ) -> None:
-    """Publish every release destination as one rollback-capable transaction."""
+    """Publish every release destination as one rollback-capable transaction.
+
+    Raises:
+        PublicationPreconditionError: If a target changed before publication.
+        PublicationError: If publication, rollback or cleanup fails.
+
+    """
     plan = _publication_plan(replacements, removals)
+    expected = _expected_publication_digests(plan, expected_digests or {})
+    absent = tuple(Path(path) for path in required_absent)
     snapshots = _publication_snapshots(plan)
+    _require_snapshot_preconditions(snapshots, expected)
+    _require_absent_preconditions(absent)
     prepared = _prepare_publication(plan)
     try:
+        _require_live_preconditions(expected)
+        _require_absent_preconditions(absent)
         _apply_publication(plan, prepared)
+    except PublicationPreconditionError as precondition_error:
+        cleanup_errors = _cleanup_paths(prepared.values())
+        if cleanup_errors:
+            details = "; ".join(f"{type(error).__name__}: {error}" for error in cleanup_errors)
+            raise PublicationError(
+                _PipelineProblem.PRECONDITION_CLEANUP,
+                details,
+            ) from precondition_error
+        raise
     except OSError as publication_error:
         rollback_errors = _restore_publication(plan, snapshots)
         cleanup_errors = _cleanup_paths(prepared.values())
