@@ -1,50 +1,146 @@
 # Excel Project Management Workbook
 
-This repository builds one lean, macro-enabled Excel 365 project tracker for when there is no single project, product or programme management tool that everyone involved can use. The generated release is [`PM_Workbook.xlsm`](PM_Workbook.xlsm).
+<p align="center">
+  <strong>One shared delivery view when the work lives across teams, companies and tools.</strong>
+</p>
 
-That might be because the work spans teams, organisations, companies or regions, with each group using a different tool - or a different instance of the same one. `Overview` gives senior leaders one clean report without asking them to log into any of them. `Export to Markdown` gives you one status file to hand to any tool that cannot connect to those systems either.
+<p align="center">
+  <a href="https://github.com/maxymax92/excel-pm-tool/releases/latest"><img src="https://img.shields.io/github/v/release/maxymax92/excel-pm-tool?style=flat-square&amp;label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Excel-365%20desktop-217346?style=flat-square&amp;logo=microsoftexcel&amp;logoColor=white" alt="Excel 365 desktop">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12 build">
+</p>
 
-Enter work in `Items`, record risks and decisions in `RAID`, and manage the workbook rules in `Config`. `Overview`, `Plan` and the protected `Calc` layer are derived from that source data.
+<p align="center">
+  <a href="https://github.com/maxymax92/excel-pm-tool/releases/latest/download/PM_Workbook.xlsm"><strong>Download the latest workbook</strong></a>
+  &nbsp;&middot;&nbsp;
+  <a href="docs/user-guide.md">User guide</a>
+  &nbsp;&middot;&nbsp;
+  <a href="docs/agent-data-bridge.md">Agent workflow</a>
+</p>
+
+When delivery spans teams, organisations, suppliers or regions, another project system rarely solves the reporting problem. This workbook gives everyone one compact coordination layer without asking every team to abandon the tools they already use.
+
+Work lives in `Items` and `RAID`. `Config` owns the rules. `Overview` gives leaders an exception-led brief, while `Plan` gives delivery teams a six-level weekly schedule. The `Export to Markdown` button writes one clean `PM_Status_yyyy-mm-dd.md` handoff for reporting or an AI tool.
+
+This is a shared record, not live synchronisation between the systems around it. Store and govern the working file through the document controls your organisation already trusts.
+
+Under the workbook is a deterministic Python build, source-controlled VBA, desktop-Excel verification, durable data migration and a review-before-apply agent workflow. The interface stays Excel; the repository treats the workbook as a versioned, generated release.
+
+> **What changed in version 1.2.0:** provider-neutral agent changes, durable source identities, explicit Deleted history, direct per-item reporting and stronger transactional publication. [Read the release notes](https://github.com/maxymax92/excel-pm-tool/releases/tag/v1.2.0).
 
 ## See it in action
 
-The mock-ups use the populated demo workbook, so the hierarchy, dates and exceptions show how the finished system behaves.
+These views use the populated demonstration workbook, so the hierarchy, dates and exceptions show how the finished system behaves.
 
 <p align="center">
-  <a href="docs/assets/readme/plan.png">
-    <img src="docs/assets/readme/plan.png" alt="Plan view showing a six-level project schedule, status legend and weekly Gantt timeline" width="100%">
+  <a href="docs/assets/readme/overview.png">
+    <img src="docs/assets/readme/overview.png" alt="Overview showing scope health, top RAID, coming dates and recent progress" width="100%">
   </a>
+  <br><strong>Overview</strong> - one compact stakeholder brief built from the live delivery record.
 </p>
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <a href="docs/assets/readme/overview.png">
-        <img src="docs/assets/readme/overview.png" alt="Overview showing scopes, top RAID, coming dates and recent progress" width="100%">
+      <a href="docs/assets/readme/plan.png">
+        <img src="docs/assets/readme/plan.png" alt="Plan view showing a six-level project schedule, status legend and weekly timeline" width="100%">
       </a>
-      <br><strong>Overview</strong> - a compact stakeholder readout built from live workbook data.
+      <br><strong>Plan</strong> - a filterable 52-week schedule with intervals, key dates and the current week.
     </td>
     <td width="50%" valign="top">
       <a href="docs/assets/readme/items-raid.png">
         <img src="docs/assets/readme/items-raid.png" alt="Items hierarchy and RAID register shown together" width="100%">
       </a>
-      <br><strong>Items & RAID</strong> - structured delivery data, hierarchy controls and clear exception highlighting.
+      <br><strong>Items &amp; RAID</strong> - the shared operational record, with hierarchy controls and clear exception cues.
     </td>
   </tr>
 </table>
 
-## What the workbook does
+## What you get
 
-| Sheet | Purpose |
+| Capability | What it gives you |
 |---|---|
-| Overview | Shows scopes, top RAID, upcoming dates and recent progress in four stakeholder panels |
-| Plan | Shows a filterable six-level schedule with weekly bars, key dates and the current week |
-| Items | Holds the editable hierarchy, workflow, ownership, dates, delivery health and latest status |
-| RAID | Holds editable risks, assumptions, issues, dependencies and decisions |
-| Config | Owns settings, taxonomy, workflow roles, severity bands and people |
-| Calc | Supplies protected calculations, lookups and dynamic view data |
+| One shared delivery model | Commitments, dates, status, ownership, health, risks and decisions in one portable file |
+| Executive reporting | Scope health, top RAID, coming dates and recent progress without another system login |
+| A real delivery hierarchy | Six configurable levels, parent-first WBS order, up to three scopes and a 52-week Plan |
+| Bounded, visible capacity | 2,000 Item rows, 2,000 RAID rows and 500 rows per Config list, with explicit capacity warnings |
+| Item-owned reporting values | Every item keeps its own owner, health, status, dates and narrative; hierarchy never substitutes another row's values |
+| Config-driven behaviour | Types, status roles, RAID rules, severity bands, people, thresholds, prefixes and counters stay editable in Excel |
+| Clean handoffs | One UTF-8 Markdown snapshot with no runtime logs, caches or sidecars |
+| Safe upgrades | Authored rows and Config values survive structural rebuilds through snapshots, semantic comparison and rollback |
+| Controlled agent updates | Source-specific interpretation stays outside Excel; the workbook accepts only a strict change set with a read-only plan and reviewed token |
 
-Its VBA assigns IDs, stamps workflow dates, organises the item hierarchy, fits the opening window to the screen and exports one clean UTF-8 Markdown file without runtime logs or sidecars.
+## Get started
+
+1. [Download `PM_Workbook.xlsm`](https://github.com/maxymax92/excel-pm-tool/releases/latest/download/PM_Workbook.xlsm).
+2. Open it in Microsoft Excel 365 desktop and enable macros.
+3. Review or delete the clearly marked example rows.
+4. Maintain the shared rules and people in `Config`.
+5. Record work in `Items` and risks or decisions in `RAID`.
+6. Use `Overview` for the stakeholder brief and `Plan` for schedule review.
+
+Macros assign IDs, stamp lifecycle dates, organise the hierarchy and export Markdown. Those actions do not run when macros are disabled.
+
+The current release is verified on Microsoft Excel 365 Personal for Mac 16.111. The VBA includes Windows-specific path and destination branches, but Windows is not yet part of the release test. Normal workbook use needs only the downloaded file; the Python workflows below are for maintainers and agents working from a source checkout.
+
+## Six sheets, clear responsibilities
+
+| Sheet | Responsibility |
+|---|---|
+| Overview | Protected, derived stakeholder brief with scope health, top RAID, coming dates and recent progress |
+| Plan | Protected, derived six-level schedule with scope, depth and date-window controls |
+| Items | Editable work hierarchy, workflow, ownership, dates, delivery health and latest status |
+| RAID | Editable risks, assumptions, issues, dependencies and decisions |
+| Config | Editable settings, taxonomy, workflow roles, severity bands and people |
+| Calc | Protected, hidden calculation and bounded-spill layer |
+
+The VBA project assigns IDs, stamps lifecycle dates, applies hierarchy presentation, organises Items into WBS order, fits the opening window and exports the Markdown status file. Formula and conditional-formatting rules keep derived views current and flag incomplete or contradictory data without silently changing what the user entered.
+
+## Review agent changes before they reach Excel
+
+The repository ships a provider-neutral change-set boundary, not connectors or a model SDK. An agent may interpret an API, MCP tool, file or pasted text using whatever access it has. Only the strict change set crosses the workbook-mutation boundary, and a read-only plan shows the exact result before anything is applied.
+
+```bash
+.venv/bin/python -m build.data describe [workbook] [--output FILE]
+.venv/bin/python -m build.data plan CHANGESET|- [workbook] [--output FILE]
+.venv/bin/python -m build.data apply CHANGESET|- [workbook] --approve PLAN_TOKEN [--output FILE]
+```
+
+- `describe` returns the contract, current Config choices, records and exact workbook digests.
+- `plan` returns creates, updates, explicit Deleted transitions, no-ops, field diffs, warnings and errors without writing anything.
+- `apply` reparses and replans the same bytes, verifies the reviewed token and workbook digest, then uses the normal snapshot, rebuild, Excel and publication pipeline.
+
+Only `Items` and `RAID` input fields are writable. IDs, formulas, lifecycle stamps, Config and People remain workbook-owned. Source omission never means deletion. `mark_deleted` changes one row's status and keeps the row as visible history; a later reappearance receives a fresh workbook ID. A true no-op creates no snapshot, backup or build artifact.
+
+Imported text stays literal even when it begins with `=`, `+`, `-` or `@`, or looks like a URL. The token guards the reviewed plan against a stale workbook; it is not a user-authentication system. The complete contract, worked example and paste-ready prompt are in the [agent data bridge guide](docs/agent-data-bridge.md).
+
+## Keep data across rebuilds
+
+A generated workbook is a disposable rendering of two durable inputs: the source under `build/` and a JSON snapshot of everything a user authored. Structural upgrades never edit a populated workbook in place.
+
+```bash
+.venv/bin/python -m build.data export [workbook]
+.venv/bin/python -m build.data migrate [workbook]
+```
+
+`export` captures Items, RAID, Config lists, people, settings and VBA-stamped values into the bounded ring in `dist/snapshots/`. `migrate` rebuilds the workbook with that data injected, recalculates it in desktop Excel, compares the intended authored snapshot with the rebuilt result and publishes it transactionally. The replaced workbook is retained in `dist/backups/`.
+
+Out-of-schema tables, columns or settings, duplicate or missing IDs, capacity breaches and types the taxonomy cannot level stop before the build with an actionable diagnostic. Existing values that the workbook flags red migrate unchanged and are reported as warnings.
+
+## Built like software
+
+This is not a hand-maintained template. The release pipeline:
+
+- generates every sheet, table, formula, name, validation rule, format and theme from Python source;
+- embeds a lean VBA project and verifies the compiled binary against both source modules;
+- disables automatic formula and URL conversion for imported text;
+- full-rebuilds disposable copies in desktop Excel and treats repair output as a release blocker;
+- compares formulas, names, validation, conditional formatting, package parts and VBA before publication;
+- verifies empty, representative and adversarial workbook states, plus live interactions and latency;
+- publishes every destination and required pre-change backup as one rollback-capable transaction;
+- binds final live evidence to the exact source and workbook digests.
+
+The implementation details and verification layers are documented in [Toolchain and release capabilities](docs/capabilities.md).
 
 ## Build from source
 
@@ -55,7 +151,11 @@ uv sync --frozen
 .venv/bin/python -m build
 ```
 
-The release pipeline requires the compiled VBA to match both source modules exactly. It builds untouched `.xlsx` and `.xlsm` baselines, full-rebuilds disposable copies in desktop Excel, and compares worksheet and table formulas, defined names, validation, conditional formatting, package parts and the VBA project before publication. Excel must have no other workbooks open because `CalculateFullRebuild` operates across the Excel application.
+All release destinations publish together or return to their original bytes:
+
+- `dist/PM_Workbook.xlsx` - formula-only QA copy
+- `dist/PM_Workbook.xlsm` - macro-enabled release
+- `PM_Workbook.xlsm` - promoted release copy
 
 After either VBA source file changes, refresh the compiled project without opening the Visual Basic Editor:
 
@@ -63,56 +163,25 @@ After either VBA source file changes, refresh the compiled project without openi
 .venv/bin/python -m build.automation.refresh_vba
 ```
 
-The command replaces both complete modules in a disposable workbook, proves that no non-VBA package member changed, has desktop Excel compile and save the project, verifies the compiled caches and exact source, then atomically publishes `build/vba/vbaProject.bin`.
+The refresh replaces both complete modules in a disposable workbook, proves that no non-VBA package member changed, has Excel compile and save the project, verifies the result and atomically publishes `build/vba/vbaProject.bin`.
 
-All destinations are published as one rollback-capable transaction:
-
-- `dist/PM_Workbook.xlsx` - formula-only QA copy
-- `dist/PM_Workbook.xlsm` - macro-enabled release
-- `PM_Workbook.xlsm` - promoted release copy
-
-Desktop Excel must be installed and the release command must be permitted to control it. Do not maintain the generated workbook by editing it directly. Change the source in `build/`, rebuild it and verify the result.
-
-## Keep data across rebuilds
-
-A rebuild produces an empty workbook, so structural changes never touch a populated copy directly. The data layer treats the workbook as a disposable rendering of two durable inputs: the source in `build/` and a JSON snapshot of everything a user authored - `Items` and `RAID` rows, `Config` lists, people and settings. Formula columns are never exported or injected; the rebuilt structure recomputes them.
-
-```bash
-.venv/bin/python -m build.data export [workbook]
-.venv/bin/python -m build.data migrate [workbook]
-```
-
-`export` captures the authored data into `dist/snapshots/` (a bounded ring, newest twenty kept) and both commands default to the root `PM_Workbook.xlsm`. `migrate` exports a snapshot first, rebuilds the workbook from the current source with the same rows injected during the build, then reuses the release pipeline's desktop-Excel recalculation, semantic comparison and rollback-capable publication. The replaced workbook is kept in `dist/backups/` before anything is swapped.
-
-Migration reconciles rather than guesses: rows keep their identifiers and source identities, new columns start blank and are reported, the VBA ID counters are raised above every existing identifier, and shipped example rows (the ones marked "EXAMPLE — delete this row") are skipped and counted. Anything that would lose data - out-of-schema columns, settings or tables, duplicate or missing identifiers, rows beyond the supported capacity, item types the taxonomy cannot level - halts before the build with an actionable message. Values the workbook itself flags in red, such as a status outside the configured list, migrate unchanged and are listed as warnings. Excel must have the workbook closed; the same snapshot format is the interchange for importing content from external systems.
-
-### Update from any source through an agent
-
-```bash
-.venv/bin/python -m build.data describe [workbook] [--output FILE]
-.venv/bin/python -m build.data plan CHANGESET|- [workbook] [--output FILE]
-.venv/bin/python -m build.data apply CHANGESET|- [workbook] --approve PLAN_TOKEN [--output FILE]
-```
-
-The provider-neutral bridge lets an agent interpret an API, MCP tool, file or pasted text without giving any source a privileged workbook path. `describe` returns the strict JSON contract, current Config choices, records and exact digests. `plan` stays read-only and returns creates, updates, explicit Deleted transitions, no-ops, field diffs, warnings and a token bound to the intended workbook state and local lifecycle date. `apply` reparses and replans the same change set, requires the reviewed token and workbook digest, then uses the existing snapshot, rebuild, desktop-Excel verification and rollback-capable publication pipeline.
-
-Only `Items` and `RAID` input fields can be changed. Source identities are durable system fields; IDs, formulas, lifecycle stamps, Config and People remain workbook-owned. Source omission never means deletion, and no row is physically erased. A true no-op creates no snapshot, backup or build artifact. See the complete contract example and paste-ready agent prompt in the [agent data bridge guide](docs/agent-data-bridge.md).
+Do not maintain the generated workbook by editing the release artifact. Change the source in `build/`, rebuild it and verify the result.
 
 ## Verify a release
 
-The release gate has two explicit phases. First, run every automated check and create a template bound to the exact source tree and release workbook:
+The release gate has two explicit phases. `prepare` runs the automated matrix and creates an evidence template bound to the exact source tree and workbook:
 
 ```bash
 .venv/bin/python -m build.qa.release prepare --evidence-template /tmp/pm-workbook-macro-evidence.json
 ```
 
-`prepare` returns status 2 after the automated gates pass because a release is deliberately blocked at that point. Use a disposable copy of the exact generated `.xlsm` to complete the live checks in [VBA maintenance](docs/vba-maintenance.md), fill every template check with `PASS`, and record the generated Markdown evidence. Then run:
+The deliberate status 2 means the automated checks passed and the release is waiting for live Excel evidence. Complete the checks in [VBA maintenance](docs/vba-maintenance.md) on a disposable copy of that exact workbook, then run:
 
 ```bash
 .venv/bin/python -m build.qa.release final --macro-evidence /tmp/pm-workbook-macro-evidence.json
 ```
 
-`final` accepts evidence only for the current source digest and exact release workbook, requires it to be less than 24 hours old, verifies the UTF-8 Markdown and export-directory contents, and reruns the non-mutating release matrix. Only its zero exit status is a shippable result. The matrix includes strict Ruff checks, source hygiene, compiled VBA matching, structural and design QA for both formats, formula scenarios, desktop-Excel save preservation, interaction performance and the populated demonstration workbook.
+`final` accepts only fresh evidence for the current source and workbook digests, verifies the Markdown export and reruns the non-mutating release matrix. Only its zero exit status is a release pass. Excel must have no other workbooks open during rebuild checks because `CalculateFullRebuild` works across the Excel application.
 
 ## Repository map
 
