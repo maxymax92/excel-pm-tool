@@ -89,6 +89,10 @@ Plan marks states with both color and glyph:
 
 The status rail reports invalid controls, capacity limits and work lacking usable schedule dates.
 
+## Upgrades and imports
+
+A newer workbook version never asks you to re-enter data. With the workbook closed in Excel, `python -m build.data migrate` re-renders it from the current source with your rows, Config lists and settings injected, keeps the replaced file in `dist/backups/` and a JSON snapshot of your data in `dist/snapshots/`, and prints exactly what changed. `python -m build.data monday <board-id>` pulls a monday.com board into Items the same way; add `--dry-run` to preview the result first. Both commands report every skipped example row, defaulted setting and value the workbook flags in red - nothing is dropped or corrected silently.
+
 ## Error handling
 
 Red input or Config cells indicate invalid pasted or entered data. Correct the highlighted value before relying on derived views. Items and RAID never reject or undo an edit: a value the workbook does not recognise simply skips its lifecycle stamp and stays highlighted until you fix it. Organise rows and the Markdown export still check the data they act on and report exactly what needs completing. An Excel repair report, formula error or failed macro is a release issue.

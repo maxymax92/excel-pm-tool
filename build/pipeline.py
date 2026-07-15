@@ -585,7 +585,7 @@ def _raise_publication_failure(
     raise PublicationError(_PipelineProblem.PUBLICATION_RECOVERED) from operation_error
 
 
-def _publish_transaction(
+def publish_transaction(
     replacements: Mapping[str | Path, str | Path],
     *,
     removals: Iterable[str | Path] = (),
@@ -617,16 +617,23 @@ def _semantic_preservation_problems(source: Path, calculated: Path) -> list[str]
     return [f"{calculated.name}: {issue}" for issue in compare_packages(source, calculated)]
 
 
-def _recalculate_stage(raw: Path, calculated: Path) -> None:
+def recalculate_stage(raw: Path, calculated: Path) -> None:
+    """Copy one authored workbook and have desktop Excel recalculate the copy."""
     shutil.copy2(raw, calculated)
     recalculate(calculated)
     if calculated.suffix.lower() == ".xlsm":
         _restore_registered_vba(calculated)
 
 
-def _require_semantic_preservation(
+def require_semantic_preservation(
     pairs: Iterable[tuple[Path, Path]],
 ) -> None:
+    """Require every calculated copy to preserve its authored semantics.
+
+    Raises:
+        SemanticPreservationError: If desktop Excel changed authored semantics.
+
+    """
     problems = [
         problem
         for source, calculated in pairs
@@ -650,9 +657,9 @@ def _build_stage(stage: Path) -> tuple[Path, Path]:
 
     build_one(raw_xlsx, with_vba=False)
     build_one(raw_xlsm, with_vba=True)
-    _recalculate_stage(raw_xlsx, calculated_xlsx)
-    _recalculate_stage(raw_xlsm, calculated_xlsm)
-    _require_semantic_preservation(((raw_xlsx, calculated_xlsx), (raw_xlsm, calculated_xlsm)))
+    recalculate_stage(raw_xlsx, calculated_xlsx)
+    recalculate_stage(raw_xlsm, calculated_xlsm)
+    require_semantic_preservation(((raw_xlsx, calculated_xlsx), (raw_xlsm, calculated_xlsm)))
     return calculated_xlsx, calculated_xlsm
 
 
@@ -663,7 +670,7 @@ def main() -> None:
 
     with excel_working_directory("pm-build-") as stage:
         calculated_xlsx, calculated_xlsm = _build_stage(stage)
-        _publish_transaction(
+        publish_transaction(
             {
                 DIST / "PM_Workbook.xlsx": calculated_xlsx,
                 DIST / "PM_Workbook.xlsm": calculated_xlsm,

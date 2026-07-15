@@ -271,6 +271,20 @@ def _source_gate_matrix() -> tuple[Gate, ...]:
             "-q",
             "build.qa.test_verify_excel",
         ),
+        _python_gate(
+            "authored-data layer contracts",
+            "-m",
+            "unittest",
+            "-q",
+            "build.qa.test_data_layer",
+        ),
+        _python_gate(
+            "monday.com import contracts",
+            "-m",
+            "unittest",
+            "-q",
+            "build.qa.test_monday_import",
+        ),
         _python_gate("VBA source contract", "-m", "build.qa.vba_source"),
         _python_gate("compiled VBA source match", "-m", "build.qa.verify_vba"),
     )

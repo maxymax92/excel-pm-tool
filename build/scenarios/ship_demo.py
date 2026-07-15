@@ -33,6 +33,7 @@ import openpyxl
 from openpyxl.utils.cell import range_boundaries
 
 from .. import pipeline
+from ..data.inject import swapped_module_state
 from ..paths import DIST
 from ..spec import config, examples
 from ..spec import items as item_spec
@@ -761,44 +762,27 @@ def _patched_settings() -> list[tuple[str, object, str]]:
 def demo_source() -> Iterator[None]:
     """Patch imported data/config objects only for the duration of one build.
 
-    Raises:
-        ShipDemoError: If restoration fails while another operation is failing.
+    Yields:
+        Nothing; the demonstration state lives for the context body.
 
     """
-    original = {
-        "items": examples.ITEMS_EXAMPLES,
-        "people": examples.PEOPLE_EXAMPLES,
-        "raid": examples.RAID_EXAMPLES,
-        "teams": config.TEAMS,
-        "settings": config.SETTINGS,
+    replacements: dict[tuple[object, str], object] = {
+        (examples, "ITEMS_EXAMPLES"): copy.deepcopy(ITEMS),
+        (examples, "PEOPLE_EXAMPLES"): copy.deepcopy(PEOPLE),
+        (examples, "RAID_EXAMPLES"): copy.deepcopy(RAID),
+        (config, "TEAMS"): list(TEAMS),
+        (config, "SETTINGS"): _patched_settings(),
     }
-    examples.ITEMS_EXAMPLES = copy.deepcopy(ITEMS)
-    examples.PEOPLE_EXAMPLES = copy.deepcopy(PEOPLE)
-    examples.RAID_EXAMPLES = copy.deepcopy(RAID)
-    config.TEAMS = list(TEAMS)
-    config.SETTINGS = _patched_settings()
 
-    def _restore() -> None:
-        examples.ITEMS_EXAMPLES = original["items"]
-        examples.PEOPLE_EXAMPLES = original["people"]
-        examples.RAID_EXAMPLES = original["raid"]
-        config.TEAMS = original["teams"]
-        config.SETTINGS = original["settings"]
+    def _restore_error(cleanup_error: BaseException) -> Exception:
+        return ShipDemoError(
+            _ShipDemoProblem.RESTORE,
+            type(cleanup_error).__name__,
+            cleanup_error,
+        )
 
-    try:
+    with swapped_module_state(replacements, _restore_error):
         yield
-    except BaseException as operation_error:
-        try:
-            _restore()
-        except (AttributeError, TypeError) as cleanup_error:
-            raise ShipDemoError(
-                _ShipDemoProblem.RESTORE,
-                type(cleanup_error).__name__,
-                cleanup_error,
-            ) from operation_error
-        raise
-    else:
-        _restore()
 
 
 def _source_qa() -> None:
